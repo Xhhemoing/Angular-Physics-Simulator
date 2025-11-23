@@ -1,0 +1,5 @@
+{
+  "name": "Copy of Angular Physics Simulator",
+  "description": "An interactive physics simulator for high school students to explore mechanics and kinematics. Add objects like blocks and balls, set their properties, and watch them interact in a 2D environment with adjustable gravity and collisions.",
+  "requestFramePermissions": []
+}

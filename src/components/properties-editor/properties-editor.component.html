@@ -1,0 +1,211 @@
+<div class="text-gray-300">
+  @if (selectedObject(); as obj) {
+    <div class="bg-gray-700/50 p-4 rounded-lg space-y-4">
+      <div class="flex justify-between items-center">
+        <h3 class="text-lg font-semibold capitalize text-white">{{obj.type}} #{{obj.id}}</h3>
+        <button (click)="onDelete()" class="text-gray-400 hover:text-red-500 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Common Dynamic Properties -->
+      @if (obj.type === 'ball' || obj.type === 'block') {
+        <div>
+          <label class="block text-sm font-medium text-gray-400">质量 (kg)</label>
+          <input type="number" [value]="obj.mass" (input)="onValueChange('mass', $any($event.target).value)"
+                 class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+        </div>
+         <div>
+          <label class="block text-sm font-medium text-gray-400">电荷 (C)</label>
+          <input type="number" [value]="obj.charge" (input)="onValueChange('charge', $any($event.target).value)"
+                 class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-400">恢复系数</label>
+          <input type="number" step="0.1" min="0" max="1" [value]="obj.restitution" (input)="onValueChange('restitution', $any($event.target).value)"
+                 class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+        </div>
+         <div>
+          <label class="block text-sm font-medium text-gray-400">摩擦系数</label>
+          <input type="number" step="0.05" min="0" [value]="obj.friction" (input)="onValueChange('friction', $any($event.target).value)"
+                 class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-400">位置 (x, y)</label>
+          <div class="flex space-x-2 mt-1">
+            <input type="number" [value]="obj.position.x" (input)="onValueChange('position.x', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+            <input type="number" [value]="obj.position.y" (input)="onValueChange('position.y', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+        </div>
+         <div>
+          <label class="block text-sm font-medium text-gray-400">速度 (vx, vy)</label>
+          <div class="flex space-x-2 mt-1">
+            <input type="number" [value]="obj.velocity.x" (input)="onValueChange('velocity.x', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+            <input type="number" [value]="obj.velocity.y" (input)="onValueChange('velocity.y', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+        </div>
+      }
+
+      <!-- Specific Properties -->
+      @switch (obj.type) {
+        @case ('ball') {
+          <div>
+            <label class="block text-sm font-medium text-gray-400">半径 (m)</label>
+            <input type="number" [value]="obj.radius" (input)="onValueChange('radius', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+        }
+        @case ('block') {
+          <div>
+            <label class="block text-sm font-medium text-gray-400">宽度 (m)</label>
+            <input type="number" [value]="obj.width" (input)="onValueChange('width', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-400">高度 (m)</label>
+            <input type="number" [value]="obj.height" (input)="onValueChange('height', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+           <div>
+            <label class="block text-sm font-medium text-gray-400">角速度 (rad/s)</label>
+            <input type="number" step="0.1" [value]="obj.angularVelocity" (input)="onValueChange('angularVelocity', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+        }
+        @case ('plane') {
+          <div>
+            <label class="block text-sm font-medium text-gray-400">摩擦系数</label>
+            <input type="number" step="0.05" [value]="obj.friction" (input)="onValueChange('friction', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-400">恢复系数</label>
+            <input type="number" step="0.1" min="0" max="1" [value]="obj.restitution" (input)="onValueChange('restitution', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+        }
+        @case ('conveyor') {
+          <div>
+            <label class="block text-sm font-medium text-gray-400">摩擦系数</label>
+            <input type="number" step="0.05" [value]="obj.friction" (input)="onValueChange('friction', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+           <div>
+            <label class="block text-sm font-medium text-gray-400">速度 (m/s)</label>
+            <input type="number" [value]="obj.speed" (input)="onValueChange('speed', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-400">恢复系数</label>
+            <input type="number" step="0.1" min="0" max="1" [value]="obj.restitution" (input)="onValueChange('restitution', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+        }
+        @case ('spring') {
+          <div>
+            <label class="block text-sm font-medium text-gray-400">连接物体ID</label>
+            <p class="mt-1 text-gray-400">{{obj.object1Id}} &harr; {{obj.object2Id}}</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-400">劲度系数 (k)</label>
+            <input type="number" [value]="obj.stiffness" (input)="onValueChange('stiffness', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-400">原长 (m)</label>
+            <input type="number" [value]="obj.restLength" (input)="onValueChange('restLength', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+        }
+        @case ('rod') {
+          <div>
+            <label class="block text-sm font-medium text-gray-400">连接物体ID</label>
+            <p class="mt-1 text-gray-400">{{obj.object1Id}} &harr; {{obj.object2Id}}</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-400">长度 (m)</label>
+            <input type="number" [value]="obj.length" (input)="onValueChange('length', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+        }
+        @case ('pin') {
+          <div>
+            <label class="block text-sm font-medium text-gray-400">位置 (x, y)</label>
+            <div class="flex space-x-2 mt-1">
+              <input type="number" [value]="obj.position.x" (input)="onValueChange('position.x', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+              <input type="number" [value]="obj.position.y" (input)="onValueChange('position.y', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+            </div>
+          </div>
+        }
+        @case ('arc') {
+          <div>
+            <label class="block text-sm font-medium text-gray-400">圆心 (x, y)</label>
+            <div class="flex space-x-2 mt-1">
+              <input type="number" [value]="obj.center.x" (input)="onValueChange('center.x', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+              <input type="number" [value]="obj.center.y" (input)="onValueChange('center.y', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-400">半径 (m)</label>
+            <input type="number" [value]="obj.radius" (input)="onValueChange('radius', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-400">起始角度 (rad)</label>
+            <input type="number" step="0.1" [value]="obj.startAngle" (input)="onValueChange('startAngle', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-400">终止角度 (rad)</label>
+            <input type="number" step="0.1" [value]="obj.endAngle" (input)="onValueChange('endAngle', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-400">摩擦系数</label>
+            <input type="number" step="0.05" [value]="obj.friction" (input)="onValueChange('friction', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+           <div>
+            <label class="block text-sm font-medium text-gray-400">恢复系数</label>
+            <input type="number" step="0.1" min="0" max="1" [value]="obj.restitution" (input)="onValueChange('restitution', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+        }
+        @case ('field') {
+           <div>
+            <label class="block text-sm font-medium text-gray-400">位置 (x, y)</label>
+            <div class="flex space-x-2 mt-1">
+              <input type="number" [value]="obj.position.x" (input)="onValueChange('position.x', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+              <input type="number" [value]="obj.position.y" (input)="onValueChange('position.y', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-400">尺寸 (宽, 高)</label>
+            <div class="flex space-x-2 mt-1">
+              <input type="number" [value]="obj.width" (input)="onValueChange('width', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+              <input type="number" [value]="obj.height" (input)="onValueChange('height', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-400">电场 (Ex, Ey)</label>
+            <div class="flex space-x-2 mt-1">
+              <input type="number" [value]="obj.electricField.x" (input)="onValueChange('electricField.x', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+              <input type="number" [value]="obj.electricField.y" (input)="onValueChange('electricField.y', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-400">磁场 (B_z)</label>
+            <input type="number" [value]="obj.magneticField" (input)="onValueChange('magneticField', $any($event.target).value)"
+                   class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+          </div>
+        }
+      }
+    </div>
+  } @else {
+    <div class="flex items-center justify-center h-full">
+      <p class="text-gray-500">未选中物体</p>
+    </div>
+  }
+</div>

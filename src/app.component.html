@@ -1,0 +1,85 @@
+<div class="flex h-screen w-screen bg-gray-900 text-gray-200 font-sans">
+  <!-- Left Panel: Object Palette -->
+  <div class="w-64 bg-gray-800 p-4 border-r border-gray-700 flex flex-col">
+    <h1 class="text-2xl font-bold text-cyan-400 mb-4">物理模拟器</h1>
+    <app-object-palette (addObject)="startPlacingObject($event)"></app-object-palette>
+    <div class="mt-auto">
+       <button (click)="clearSimulation()" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+          清空画布
+        </button>
+    </div>
+  </div>
+
+  <!-- Center Panel: Simulation and Controls -->
+  <div class="flex-1 flex flex-col">
+    <div class="bg-gray-800 p-2 border-b border-gray-700 flex items-center justify-between">
+      <!-- Left Controls -->
+      <div class="flex items-center space-x-4">
+        <button (click)="togglePlay()"
+                class="px-4 py-2 rounded-lg font-semibold text-white transition duration-200 flex items-center space-x-2 w-28 justify-center"
+                [class]="simulationSettings().isRunning ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-green-500 hover:bg-green-600'">
+          @if (simulationSettings().isRunning) {
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v4a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg>
+            <span>暂停</span>
+          } @else {
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" /></svg>
+            <span>播放</span>
+          }
+        </button>
+        <div class="flex items-center space-x-2">
+          <label for="gravity" class="text-sm font-medium">重力 (g):</label>
+          <input type="number" id="gravity" [value]="simulationSettings().gravity" (input)="updateGravity($any($event.target).value)"
+                 class="bg-gray-700 border border-gray-600 rounded-md px-2 py-1 w-20 text-center text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+        </div>
+        <div class="flex items-center space-x-2">
+            <label for="collisions" class="text-sm font-medium">碰撞:</label>
+            <button (click)="toggleCollisions()" class="relative inline-flex items-center h-6 rounded-full w-11 transition-colors"
+                    [class]="simulationSettings().collisionsEnabled ? 'bg-cyan-500' : 'bg-gray-600'">
+                <span class="inline-block w-4 h-4 transform bg-white rounded-full transition-transform"
+                      [class]="simulationSettings().collisionsEnabled ? 'translate-x-6' : 'translate-x-1'"></span>
+            </button>
+        </div>
+      </div>
+      <!-- Right Controls -->
+      <div class="flex items-center space-x-2">
+        <button (click)="zoomIn()" title="放大" class="p-2 bg-gray-700 rounded-md hover:bg-cyan-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" /></svg></button>
+        <button (click)="zoomOut()" title="缩小" class="p-2 bg-gray-700 rounded-md hover:bg-cyan-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd" /></svg></button>
+        <button (click)="resetView()" title="重置视图" class="p-2 bg-gray-700 rounded-md hover:bg-cyan-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V8m0 0h-4m4 0l-5-5M4 16v4m0 0h4m-4 0l5-5m11 1v-4m0 0h-4m4 0l-5 5" /></svg></button>
+        <div class="h-6 border-l border-gray-600 mx-2"></div>
+        <button (click)="saveSimulation()" title="保存" class="p-2 bg-gray-700 rounded-md hover:bg-cyan-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M7.707 10.293a1 1 0 10-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 11.586V6a1 1 0 10-2 0v5.586L7.707 10.293z" /><path d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" /></svg></button>
+        <input type="file" #fileInput hidden (change)="loadSimulation($event)" accept=".json">
+        <button (click)="fileInput.click()" title="加载" class="p-2 bg-gray-700 rounded-md hover:bg-cyan-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M7.707 9.707a1 1 0 01-1.414-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 8.414V14a1 1 0 11-2 0V8.414L7.707 9.707z" /><path d="M17 3a1 1 0 011 1v12a1 1 0 11-2 0V4a1 1 0 011-1z" /></svg></button>
+        <button (click)="exportImage()" title="导出PNG" class="p-2 bg-gray-700 rounded-md hover:bg-cyan-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clip-rule="evenodd" /></svg></button>
+      </div>
+    </div>
+    <div class="flex-1 bg-gray-900 overflow-hidden">
+      <app-simulation-canvas 
+        [objects]="physicsObjects"
+        [settings]="simulationSettings()"
+        [placingObjectType]="placingObjectType"
+        [selectedObject]="selectedObject"
+        (selectObject)="selectObject($event)"
+        (placeObject)="placeObject($event)"
+        (dataPoint)="addDataPoint($event)">
+      </app-simulation-canvas>
+    </div>
+  </div>
+
+  <!-- Right Panel: Properties Editor -->
+  <div class="w-80 bg-gray-800 p-4 border-l border-gray-700 overflow-y-auto">
+    <h2 class="text-xl font-bold text-cyan-400 mb-4">属性</h2>
+    <app-properties-editor 
+      [selectedObject]="selectedObject()"
+      (objectChange)="updateObject($event)"
+      (deleteObject)="deleteSelectedObject()">
+    </app-properties-editor>
+
+    @if (selectedObject(); as obj) {
+      @if (obj.type === 'ball' || obj.type === 'block') {
+        <div class="mt-4">
+          <app-graph-view [data]="graphData()"></app-graph-view>
+        </div>
+      }
+    }
+  </div>
+</div>
