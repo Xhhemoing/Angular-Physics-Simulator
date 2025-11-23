@@ -1,10 +1,37 @@
 <div class="bg-gray-700/50 p-4 rounded-lg space-y-3 text-gray-300">
-  <h3 class="text-lg font-semibold text-white">运动学图像</h3>
-  <div class="flex border-b border-gray-600">
-    <button (click)="selectTab('x-t')" [class]="activeTab() === 'x-t' ? 'border-cyan-400 text-cyan-400' : 'border-transparent text-gray-400 hover:text-white'" class="px-4 py-2 text-sm font-medium border-b-2 transition-colors">x-t 图像</button>
-    <button (click)="selectTab('v-t')" [class]="activeTab() === 'v-t' ? 'border-cyan-400 text-cyan-400' : 'border-transparent text-gray-400 hover:text-white'" class="px-4 py-2 text-sm font-medium border-b-2 transition-colors">v-t 图像</button>
-    <button (click)="selectTab('x-y')" [class]="activeTab() === 'x-y' ? 'border-cyan-400 text-cyan-400' : 'border-transparent text-gray-400 hover:text-white'" class="px-4 py-2 text-sm font-medium border-b-2 transition-colors">x-y 轨迹</button>
-  </div>
+  <h3 class="text-lg font-semibold text-white">图像</h3>
+  @if (targetObject(); as target) {
+    <div class="flex border-b border-gray-600">
+        @switch (target.type) {
+            @case ('ball') {
+                <button (click)="selectTab('x-t')" [class]="activeTab() === 'x-t' ? 'border-cyan-400 text-cyan-400' : 'border-transparent text-gray-400 hover:text-white'" class="px-3 py-2 text-sm font-medium border-b-2 transition-colors">x-t</button>
+                <button (click)="selectTab('v-t')" [class]="activeTab() === 'v-t' ? 'border-cyan-400 text-cyan-400' : 'border-transparent text-gray-400 hover:text-white'" class="px-3 py-2 text-sm font-medium border-b-2 transition-colors">v-t</button>
+                <button (click)="selectTab('ke-t')" [class]="activeTab() === 'ke-t' ? 'border-cyan-400 text-cyan-400' : 'border-transparent text-gray-400 hover:text-white'" class="px-3 py-2 text-sm font-medium border-b-2 transition-colors">动能-t</button>
+                <button (click)="selectTab('x-y')" [class]="activeTab() === 'x-y' ? 'border-cyan-400 text-cyan-400' : 'border-transparent text-gray-400 hover:text-white'" class="px-3 py-2 text-sm font-medium border-b-2 transition-colors">x-y</button>
+            }
+            @case ('block') {
+                <button (click)="selectTab('x-t')" [class]="activeTab() === 'x-t' ? 'border-cyan-400 text-cyan-400' : 'border-transparent text-gray-400 hover:text-white'" class="px-3 py-2 text-sm font-medium border-b-2 transition-colors">x-t</button>
+                <button (click)="selectTab('v-t')" [class]="activeTab() === 'v-t' ? 'border-cyan-400 text-cyan-400' : 'border-transparent text-gray-400 hover:text-white'" class="px-3 py-2 text-sm font-medium border-b-2 transition-colors">v-t</button>
+                <button (click)="selectTab('ke-t')" [class]="activeTab() === 'ke-t' ? 'border-cyan-400 text-cyan-400' : 'border-transparent text-gray-400 hover:text-white'" class="px-3 py-2 text-sm font-medium border-b-2 transition-colors">动能-t</button>
+                <button (click)="selectTab('x-y')" [class]="activeTab() === 'x-y' ? 'border-cyan-400 text-cyan-400' : 'border-transparent text-gray-400 hover:text-white'" class="px-3 py-2 text-sm font-medium border-b-2 transition-colors">x-y</button>
+            }
+            @case ('spring') {
+                <button (click)="selectTab('length-t')" [class]="activeTab() === 'length-t' ? 'border-cyan-400 text-cyan-400' : 'border-transparent text-gray-400 hover:text-white'" class="px-4 py-2 text-sm font-medium border-b-2 transition-colors">长度-t</button>
+                <button (click)="selectTab('energy-t')" [class]="activeTab() === 'energy-t' ? 'border-cyan-400 text-cyan-400' : 'border-transparent text-gray-400 hover:text-white'" class="px-4 py-2 text-sm font-medium border-b-2 transition-colors">势能-t</button>
+            }
+            @case ('rod') {
+                <button (click)="selectTab('angVel-t')" [class]="activeTab() === 'angVel-t' ? 'border-cyan-400 text-cyan-400' : 'border-transparent text-gray-400 hover:text-white'" class="px-4 py-2 text-sm font-medium border-b-2 transition-colors">角速度-t</button>
+            }
+        }
+    </div>
+  } @else {
+    <div class="flex border-b border-gray-600">
+      <button class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500">x-t 图像</button>
+      <button class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500">v-t 图像</button>
+      <button class="px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500">x-y 轨迹</button>
+    </div>
+  }
+  
   <div #chart class="w-full h-64 bg-gray-900/50 rounded-md overflow-hidden">
     @if (data().length < 2) {
         <div class="flex items-center justify-center h-full text-gray-500 text-sm p-4 text-center">

@@ -4,16 +4,18 @@
       <div class="flex justify-between items-center">
         <h3 class="text-lg font-semibold capitalize text-white">{{obj.type}} #{{obj.id}}</h3>
         <div class="flex items-center space-x-2">
-            <button (click)="onPin()" [class]="isPinned() ? 'text-cyan-400' : 'text-gray-400 hover:text-cyan-400'" title="固定到观察区" class="transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                    <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5.586l2.293-2.293a1 1 0 011.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 9.586V4a1 1 0 011-1zM3 14a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd" />
-                </svg>
-            </button>
-            <button (click)="onDelete()" class="text-gray-400 hover:text-red-500 transition-colors">
+            @if (obj.type === 'ball' || obj.type === 'block' || obj.type === 'spring' || obj.type === 'rod') {
+            <button (click)="onTogglePin()" class="text-gray-400 hover:text-cyan-400 transition-colors" [class]="isPinned() ? 'text-cyan-400' : ''" title="固定图像">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" />
+                <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 9.586V4a1 1 0 011-1zm-7 9a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd" />
               </svg>
             </button>
+          }
+          <button (click)="onDelete()" class="text-gray-400 hover:text-red-500 transition-colors" title="删除物体">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -30,14 +32,18 @@
                  class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-400">恢复系数 ({{ obj.restitution.toFixed(2) }})</label>
-          <input type="range" step="0.05" min="0" max="1" [value]="obj.restitution" (input)="onValueChange('restitution', $any($event.target).value)"
-                 class="mt-1 w-full h-2 bg-gray-900/70 rounded-lg appearance-none cursor-pointer accent-cyan-500">
+          <label class="block text-sm font-medium text-gray-400">恢复系数</label>
+          <div class="flex items-center space-x-3 mt-1">
+            <input type="range" min="0" max="1" step="0.05" [value]="obj.restitution" (input)="onValueChange('restitution', $any($event.target).value)" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+            <span class="text-sm font-mono w-10 text-right">{{ (+obj.restitution).toFixed(2) }}</span>
+          </div>
         </div>
          <div>
-          <label class="block text-sm font-medium text-gray-400">摩擦系数 ({{ obj.friction.toFixed(2) }})</label>
-          <input type="range" step="0.05" min="0" max="2" [value]="obj.friction" (input)="onValueChange('friction', $any($event.target).value)"
-                 class="mt-1 w-full h-2 bg-gray-900/70 rounded-lg appearance-none cursor-pointer accent-cyan-500">
+          <label class="block text-sm font-medium text-gray-400">摩擦系数</label>
+          <div class="flex items-center space-x-3 mt-1">
+            <input type="range" min="0" max="2" step="0.05" [value]="obj.friction" (input)="onValueChange('friction', $any($event.target).value)" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+            <span class="text-sm font-mono w-10 text-right">{{ (+obj.friction).toFixed(2) }}</span>
+          </div>
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-400">位置 (x, y)</label>
@@ -83,14 +89,18 @@
         }
         @case ('plane') {
           <div>
-            <label class="block text-sm font-medium text-gray-400">摩擦系数 ({{ obj.friction.toFixed(2) }})</label>
-            <input type="range" step="0.05" min="0" max="2" [value]="obj.friction" (input)="onValueChange('friction', $any($event.target).value)"
-                   class="mt-1 w-full h-2 bg-gray-900/70 rounded-lg appearance-none cursor-pointer accent-cyan-500">
+            <label class="block text-sm font-medium text-gray-400">摩擦系数</label>
+            <div class="flex items-center space-x-3 mt-1">
+              <input type="range" min="0" max="2" step="0.05" [value]="obj.friction" (input)="onValueChange('friction', $any($event.target).value)" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+              <span class="text-sm font-mono w-10 text-right">{{ (+obj.friction).toFixed(2) }}</span>
+            </div>
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-400">恢复系数 ({{ obj.restitution.toFixed(2) }})</label>
-            <input type="range" step="0.05" min="0" max="1" [value]="obj.restitution" (input)="onValueChange('restitution', $any($event.target).value)"
-                   class="mt-1 w-full h-2 bg-gray-900/70 rounded-lg appearance-none cursor-pointer accent-cyan-500">
+            <label class="block text-sm font-medium text-gray-400">恢复系数</label>
+            <div class="flex items-center space-x-3 mt-1">
+              <input type="range" min="0" max="1" step="0.05" [value]="obj.restitution" (input)="onValueChange('restitution', $any($event.target).value)" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+              <span class="text-sm font-mono w-10 text-right">{{ (+obj.restitution).toFixed(2) }}</span>
+            </div>
           </div>
            <div>
             <label class="block text-sm font-medium text-gray-400">起始点 (x, y)</label>
@@ -109,9 +119,11 @@
         }
         @case ('conveyor') {
           <div>
-            <label class="block text-sm font-medium text-gray-400">摩擦系数 ({{ obj.friction.toFixed(2) }})</label>
-             <input type="range" step="0.05" min="0" max="2" [value]="obj.friction" (input)="onValueChange('friction', $any($event.target).value)"
-                   class="mt-1 w-full h-2 bg-gray-900/70 rounded-lg appearance-none cursor-pointer accent-cyan-500">
+            <label class="block text-sm font-medium text-gray-400">摩擦系数</label>
+            <div class="flex items-center space-x-3 mt-1">
+              <input type="range" min="0" max="2" step="0.05" [value]="obj.friction" (input)="onValueChange('friction', $any($event.target).value)" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+              <span class="text-sm font-mono w-10 text-right">{{ (+obj.friction).toFixed(2) }}</span>
+            </div>
           </div>
            <div>
             <label class="block text-sm font-medium text-gray-400">速度 (m/s)</label>
@@ -119,9 +131,11 @@
                    class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-400">恢复系数 ({{ obj.restitution.toFixed(2) }})</label>
-            <input type="range" step="0.05" min="0" max="1" [value]="obj.restitution" (input)="onValueChange('restitution', $any($event.target).value)"
-                   class="mt-1 w-full h-2 bg-gray-900/70 rounded-lg appearance-none cursor-pointer accent-cyan-500">
+            <label class="block text-sm font-medium text-gray-400">恢复系数</label>
+            <div class="flex items-center space-x-3 mt-1">
+              <input type="range" min="0" max="1" step="0.05" [value]="obj.restitution" (input)="onValueChange('restitution', $any($event.target).value)" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+              <span class="text-sm font-mono w-10 text-right">{{ (+obj.restitution).toFixed(2) }}</span>
+            </div>
           </div>
            <div>
             <label class="block text-sm font-medium text-gray-400">起始点 (x, y)</label>
@@ -198,14 +212,18 @@
                    class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-400">摩擦系数 ({{ obj.friction.toFixed(2) }})</label>
-            <input type="range" step="0.05" min="0" max="2" [value]="obj.friction" (input)="onValueChange('friction', $any($event.target).value)"
-                   class="mt-1 w-full h-2 bg-gray-900/70 rounded-lg appearance-none cursor-pointer accent-cyan-500">
+            <label class="block text-sm font-medium text-gray-400">摩擦系数</label>
+            <div class="flex items-center space-x-3 mt-1">
+              <input type="range" min="0" max="2" step="0.05" [value]="obj.friction" (input)="onValueChange('friction', $any($event.target).value)" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+              <span class="text-sm font-mono w-10 text-right">{{ (+obj.friction).toFixed(2) }}</span>
+            </div>
           </div>
            <div>
-            <label class="block text-sm font-medium text-gray-400">恢复系数 ({{ obj.restitution.toFixed(2) }})</label>
-            <input type="range" step="0.05" min="0" max="1" [value]="obj.restitution" (input)="onValueChange('restitution', $any($event.target).value)"
-                   class="mt-1 w-full h-2 bg-gray-900/70 rounded-lg appearance-none cursor-pointer accent-cyan-500">
+            <label class="block text-sm font-medium text-gray-400">恢复系数</label>
+            <div class="flex items-center space-x-3 mt-1">
+              <input type="range" min="0" max="1" step="0.05" [value]="obj.restitution" (input)="onValueChange('restitution', $any($event.target).value)" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+              <span class="text-sm font-mono w-10 text-right">{{ (+obj.restitution).toFixed(2) }}</span>
+            </div>
           </div>
         }
         @case ('field') {
@@ -263,6 +281,43 @@
             <input type="number" [value]="obj.magneticField" (input)="onValueChange('magneticField', $any($event.target).value)"
                    class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
           </div>
+        }
+        @case('constantForce') {
+            <div>
+                <label class="block text-sm font-medium text-gray-400">附加到物体ID</label>
+                <p class="mt-1 text-gray-400">{{obj.attachedToId}}</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-400">作用力 (Fx, Fy)</label>
+                <div class="flex space-x-2 mt-1">
+                    <input type="number" [value]="obj.force.x" (input)="onValueChange('force.x', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+                    <input type="number" [value]="obj.force.y" (input)="onValueChange('force.y', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+                </div>
+            </div>
+        }
+        @case('initialVelocity') {
+             <div>
+                <label class="block text-sm font-medium text-gray-400">附加到物体ID</label>
+                <p class="mt-1 text-gray-400">{{obj.attachedToId}}</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-400">初速度 (vx, vy)</label>
+                <div class="flex space-x-2 mt-1">
+                    <input type="number" [value]="obj.velocity.x" (input)="onValueChange('velocity.x', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+                    <input type="number" [value]="obj.velocity.y" (input)="onValueChange('velocity.y', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+                </div>
+            </div>
+        }
+        @case('trajectory') {
+            <div>
+                <label class="block text-sm font-medium text-gray-400">附加到物体ID</label>
+                <p class="mt-1 text-gray-400">{{obj.attachedToId}}</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-400">持续时间 (s)</label>
+                <input type="number" [value]="obj.duration" (input)="onValueChange('duration', $any($event.target).value)"
+                    class="mt-1 w-full bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+            </div>
         }
       }
     </div>

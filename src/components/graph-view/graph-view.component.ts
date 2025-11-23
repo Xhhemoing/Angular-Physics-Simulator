@@ -1,7 +1,9 @@
 import { Component, ChangeDetectionStrategy, input, effect, ViewChild, ElementRef, signal, AfterViewInit } from '@angular/core';
-import { GraphDataPoint } from '../../models/physics-objects.model';
+import { GraphDataPoint, PhysicsObject } from '../../models/physics-objects.model';
 
 declare const d3: any;
+
+type GraphTab = 'x-t' | 'v-t' | 'x-y' | 'ke-t' | 'length-t' | 'energy-t' | 'angVel-t';
 
 @Component({
   selector: 'app-graph-view',
@@ -9,11 +11,25 @@ declare const d3: any;
 })
 export class GraphViewComponent implements AfterViewInit {
   data = input.required<GraphDataPoint[]>();
+  targetObject = input<PhysicsObject | null>();
   @ViewChild('chart', { static: true }) private chartContainer!: ElementRef;
 
-  activeTab = signal<'x-t' | 'v-t' | 'x-y'>('x-t');
+  activeTab = signal<GraphTab>('x-t');
 
   constructor() {
+    effect(() => {
+        const target = this.targetObject();
+        // Reset to a default tab when the target object type changes
+        if (target) {
+            switch(target.type) {
+                case 'ball':
+                case 'block': this.activeTab.set('x-t'); break;
+                case 'spring': this.activeTab.set('length-t'); break;
+                case 'rod': this.activeTab.set('angVel-t'); break;
+            }
+        }
+    }, { allowSignalWrites: true });
+
     effect(() => {
       if (this.chartContainer) {
         this.drawChart();
@@ -50,7 +66,6 @@ export class GraphViewComponent implements AfterViewInit {
 
     const chartContent = svg.append("g").attr("clip-path", "url(#clip)");
 
-
     const tab = this.activeTab();
 
     if (tab === 'x-t' || tab === 'v-t') {
@@ -60,15 +75,13 @@ export class GraphViewComponent implements AfterViewInit {
       const yLabel = isPosition ? '位置 (m)' : '速度 (m/s)';
 
       const xScale = d3.scaleLinear()
-        .domain(d3.extent(data, (d: GraphDataPoint) => d.t))
+        .domain(d3.extent(data, (d: any) => d.t))
         .range([0, width]);
 
-      const yMax = Math.max(...data.map((d: any) => Math.abs(d[y1Key])).concat(data.map((d: any) => Math.abs(d[y2Key]))));
-      const yDomain = d3.extent(data, (d: GraphDataPoint) => d[y1Key as keyof GraphDataPoint] as number)
-          .concat(d3.extent(data, (d: GraphDataPoint) => d[y2Key as keyof GraphDataPoint] as number));
+      const yDomain = d3.extent(data.flatMap((d: any) => [d[y1Key], d[y2Key]]));
 
       const yScale = d3.scaleLinear()
-        .domain(d3.extent(yDomain) as [number, number])
+        .domain(yDomain)
         .range([height, 0]).nice();
       
       const line1 = d3.line()
@@ -105,8 +118,8 @@ export class GraphViewComponent implements AfterViewInit {
       svg.append("text").attr("x", width).attr("y", height - 5).text("时间 (s)").attr("fill", "#cbd5e1").style("font-size", "12px").attr("text-anchor", "end");
 
     } else if (tab === 'x-y') {
-        const xDomain = d3.extent(data, (d: GraphDataPoint) => d.x) as [number, number];
-        const yDomain = d3.extent(data, (d: GraphDataPoint) => d.y) as [number, number];
+        const xDomain = d3.extent(data, (d: any) => d.x) as [number, number];
+        const yDomain = d3.extent(data, (d: any) => d.y) as [number, number];
 
         const rangeX = xDomain[1] - xDomain[0];
         const rangeY = yDomain[1] - yDomain[0];
@@ -145,10 +158,37 @@ export class GraphViewComponent implements AfterViewInit {
       
       svg.append("text").attr("x", 5).attr("y", -5).text("Y轴位置 (m)").attr("fill", "#cbd5e1").style("font-size", "12px");
       svg.append("text").attr("x", width).attr("y", height - 5).text("X轴位置 (m)").attr("fill", "#cbd5e1").style("font-size", "12px").attr("text-anchor", "end");
+    } else if (tab === 'length-t' || tab === 'energy-t' || tab === 'angVel-t' || tab === 'ke-t') {
+      const isLength = tab === 'length-t';
+      const isEnergy = tab === 'energy-t';
+      const isAngVel = tab === 'angVel-t';
+      const isKE = tab === 'ke-t';
+
+      const yKey = isLength ? 'length' : isEnergy ? 'potentialEnergy' : isAngVel ? 'angularVelocity' : 'kineticEnergy';
+      const yLabel = isLength ? '长度 (m)' : isEnergy ? '势能 (J)' : isAngVel ? '角速度 (rad/s)' : '动能 (J)';
+      const color = isLength ? '#f6e05e' : isEnergy ? '#c084fc' : isAngVel ? '#f87171' : '#f97316';
+
+      const xScale = d3.scaleLinear().domain(d3.extent(data, (d:any) => d.t)).range([0, width]);
+      const yScale = d3.scaleLinear().domain(d3.extent(data, (d:any) => d[yKey])).range([height, 0]).nice();
+      
+      const line = d3.line().x((d: any) => xScale(d.t)).y((d: any) => yScale(d[yKey]));
+      
+      svg.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(xScale).ticks(5)).attr('color', '#9ca3af');
+      svg.append('g').call(d3.axisLeft(yScale).ticks(5)).attr('color', '#9ca3af');
+        
+      chartContent.append('path')
+        .datum(data)
+        .attr('fill', 'none')
+        .attr('stroke', color)
+        .attr('stroke-width', 2)
+        .attr('d', line);
+      
+      svg.append("text").attr("x", 5).attr("y", -5).text(yLabel).attr("fill", "#cbd5e1").style("font-size", "12px");
+      svg.append("text").attr("x", width).attr("y", height - 5).text("时间 (s)").attr("fill", "#cbd5e1").style("font-size", "12px").attr("text-anchor", "end");
     }
   }
 
-  selectTab(tab: 'x-t' | 'v-t' | 'x-y'): void {
+  selectTab(tab: GraphTab): void {
     this.activeTab.set(tab);
   }
 }

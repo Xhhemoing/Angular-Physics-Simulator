@@ -1,11 +1,11 @@
 import { Component, ChangeDetectionStrategy, ElementRef, ViewChild, AfterViewInit, OnDestroy, input, output, effect, WritableSignal, Signal, computed } from '@angular/core';
-import { PhysicsObject, DynamicObject, Plane, Conveyor, Spring, Ball, ObjectType, Arc, Block, Rod, Pin, GraphDataPoint, FieldRegion, FieldShape, CircularFieldRegion, PolygonalFieldRegion, RectangularFieldRegion } from '../../models/physics-objects.model';
+import { PhysicsObject, DynamicObject, Plane, Conveyor, Spring, Ball, ObjectType, Arc, Block, Rod, Pin, GraphDataPoint, FieldRegion, FieldShape, CircularFieldRegion, PolygonalFieldRegion, RectangularFieldRegion, ConstantForce, InitialVelocity, Trajectory, SpringDataPoint, RodDataPoint, KinematicsDataPoint } from '../../models/physics-objects.model';
 import { Vector2D } from '../../models/vector.model';
 
 const PIN_CLICK_RADIUS = 10;
 const SNAP_DISTANCE = 15;
 const CLICK_TOLERANCE = 8;
-const WEAK_SNAP_DISTANCE = 10;
+const WEAK_SNAP_DISTANCE = 2;
 
 @Component({
   selector: 'app-simulation-canvas',
@@ -20,6 +20,7 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
   placingObjectType = input.required<Signal<ObjectType | null>>();
   placingFieldShape = input.required<Signal<FieldShape | null>>();
   selectedObject = input<Signal<PhysicsObject | null>>();
+  graphTarget = input<PhysicsObject | null>();
   
   selectObject = output<number | null>();
   placeObject = output<any>();
@@ -29,6 +30,7 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
   private animationFrameId: number | null = null;
   private lastTime: number = 0;
   private simulationTime = 0;
+  private trajectoryPoints = new Map<number, Vector2D[]>();
 
   private zoom = 1.0;
   private panOffset = new Vector2D(0, 0);
@@ -79,18 +81,26 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
     
     effect(() => {
       const type = this.placingObjectType()?.();
-      const shape = this.placingFieldShape()?.();
-      if (type === 'functionPlot') {
+      if (!type) {
+         this.placementState = { isPlacing: false, type: null, step: 'start' };
+         this.updateCursor();
+         return;
+      }
+
+      const isTool = ['trajectory', 'constantForce', 'initialVelocity'].includes(type);
+      if (isTool) {
           this.placementState = { isPlacing: false, type: null, step: 'start' };
-          return;
+          // No multi-step placement for tools, just a single click handled in onMouseDown
+      } else {
+        const shape = this.placingFieldShape()?.();
+        let step: typeof this.placementState.step = 'start';
+        if (type === 'arc' || (type === 'field' && shape === 'circle')) {
+            step = 'center';
+        } else if (type === 'field' && shape === 'polygon') {
+            step = 'polygon_point';
+        }
+        this.placementState = { isPlacing: true, type, shape, step, polygonVertices: [] };
       }
-      let step: typeof this.placementState.step = 'start';
-      if (type === 'arc' || (type === 'field' && shape === 'circle')) {
-        step = 'center';
-      } else if (type === 'field' && shape === 'polygon') {
-        step = 'polygon_point';
-      }
-      this.placementState = type ? { isPlacing: true, type, shape, step, polygonVertices: [] } : { isPlacing: false, type: null, step: 'start' };
       this.updateCursor();
     });
   }
@@ -133,6 +143,7 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
   }
   public resetTime(): void {
     this.simulationTime = 0;
+    this.trajectoryPoints.clear();
   }
 
   // --- Physics Loop ---
@@ -146,16 +157,7 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
 
   private update(dt: number): void {
     this.simulationTime += dt;
-    const selected = this.selectedObject?.()?.();
-    if (selected && (selected.type === 'ball' || selected.type === 'block')) {
-        this.dataPoint.emit({
-            t: this.simulationTime,
-            x: selected.position.x,
-            y: selected.position.y,
-            vx: selected.velocity.x,
-            vy: selected.velocity.y,
-        });
-    }
+    this.emitGraphData();
 
     const objects = this.objects()();
     const dynamicObjects = objects.filter((o): o is Ball | Block => o.type === 'ball' || o.type === 'block');
@@ -169,6 +171,8 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
     this.applySpringForces();
     this.applyElectricForces(dynamicObjects);
     this.applyExternalFieldForces(objects);
+    this.applyToolForces(objects);
+    this.updateTrajectories(dt);
 
     for (const obj of dynamicObjects) {
         if (obj === this.dragTarget) continue;
@@ -186,6 +190,58 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
 
     if (this.settings().collisionsEnabled) {
         this.handleCollisions();
+    }
+  }
+
+  private emitGraphData(): void {
+    const target = this.graphTarget();
+    if (!target) return;
+    const objectMap = this.objectsMap();
+
+    switch (target.type) {
+        case 'ball':
+        case 'block':
+            let kineticEnergy = 0.5 * target.mass * target.velocity.magnitude()**2;
+            if (target.type === 'block') {
+                kineticEnergy += 0.5 * target.momentOfInertia * target.angularVelocity**2;
+            }
+
+            this.dataPoint.emit({
+                type: 'kinematics',
+                t: this.simulationTime,
+                x: target.position.x,
+                y: target.position.y,
+                vx: target.velocity.x,
+                vy: target.velocity.y,
+                kineticEnergy: kineticEnergy,
+            } as KinematicsDataPoint);
+            break;
+        case 'spring': {
+            const obj1 = objectMap.get(target.object1Id);
+            const obj2 = objectMap.get(target.object2Id);
+            if (obj1 && obj2 && 'position' in obj1 && 'position' in obj2) {
+                const p1 = obj1.position; const p2 = obj2.position;
+                const length = p2.subtract(p1).magnitude();
+                const x = length - target.restLength;
+                const potentialEnergy = 0.5 * target.stiffness * x * x;
+                this.dataPoint.emit({ type: 'spring', t: this.simulationTime, length, potentialEnergy } as SpringDataPoint);
+            }
+            break;
+        }
+        case 'rod': {
+             const obj1 = objectMap.get(target.object1Id);
+             const obj2 = objectMap.get(target.object2Id);
+             if (obj1 && obj2 && 'position' in obj1 && 'position' in obj2 && 'velocity' in obj1 && 'velocity' in obj2) {
+                const r = obj2.position.subtract(obj1.position);
+                const v_rel = obj2.velocity.subtract(obj1.velocity);
+                const r_mag_sq = r.magnitude()**2;
+                if (r_mag_sq > 0) {
+                    const angularVelocity = (r.x * v_rel.y - r.y * v_rel.x) / r_mag_sq;
+                    this.dataPoint.emit({ type: 'rod', t: this.simulationTime, angularVelocity } as RodDataPoint);
+                }
+             }
+            break;
+        }
     }
   }
 
@@ -208,6 +264,37 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
             if ('force' in obj1) (obj1 as DynamicObject).force = (obj1 as DynamicObject).force.add(springForce);
             if ('force' in obj2) (obj2 as DynamicObject).force = (obj2 as DynamicObject).force.subtract(springForce);
         }
+    }
+  }
+
+  private applyToolForces(objects: PhysicsObject[]): void {
+      const constantForces = objects.filter((o): o is ConstantForce => o.type === 'constantForce');
+      const objectMap = this.objectsMap();
+
+      for (const tool of constantForces) {
+          const target = objectMap.get(tool.attachedToId);
+          if (target && (target.type === 'ball' || target.type === 'block')) {
+              target.force = target.force.add(tool.force);
+          }
+      }
+  }
+
+  private updateTrajectories(dt: number): void {
+    const trajectories = this.objects()().filter((o): o is Trajectory => o.type === 'trajectory');
+    const objectMap = this.objectsMap();
+    for (const traj of trajectories) {
+      if (!this.trajectoryPoints.has(traj.id)) {
+        this.trajectoryPoints.set(traj.id, []);
+      }
+      const points = this.trajectoryPoints.get(traj.id)!;
+      const target = objectMap.get(traj.attachedToId);
+      if (target && 'position' in target) {
+        points.push(target.position.clone());
+        const maxPoints = traj.duration / dt;
+        while (points.length > maxPoints) {
+          points.shift();
+        }
+      }
     }
   }
 
@@ -325,7 +412,7 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
 
   private resolveDynamicCollision(objA: Ball | Block, objB: Ball | Block): void {
       if (objA.type === 'ball' && objB.type === 'ball') {
-        this.handleBallBallCollision(objA, objB);
+          this.handleBallBallCollision(objA, objB);
       } else if (objA.type === 'ball' && objB.type === 'block') {
           this.handleBallBlockCollision(objA, objB);
       } else if (objA.type === 'block' && objB.type === 'ball') {
@@ -393,127 +480,131 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
 
     const lineDir = lineVec.normalize();
     const lineLength = lineVec.magnitude();
-
-    let maxPenetration = 0;
-    let contactVertex: Vector2D | null = null;
+    
+    const penetratingVertices: Vector2D[] = [];
+    let totalPenetration = 0;
 
     for (const vertex of vertices) {
         const projection = vertex.subtract(plane.start).dot(lineDir);
+        // Check if vertex projection is on the line segment
         if (projection >= 0 && projection <= lineLength) {
             const dist = vertex.subtract(plane.start).dot(normal);
             if (dist < 0) {
-                const penetration = -dist;
-                if (penetration > maxPenetration) {
-                    maxPenetration = penetration;
-                    contactVertex = vertex;
-                }
+                penetratingVertices.push(vertex);
+                totalPenetration += -dist;
             }
         }
     }
 
-    if (contactVertex) {
-        block.position = block.position.add(normal.multiply(maxPenetration * 1.01));
-        this.applyImpulse(block, null, normal, plane.restitution, plane.friction, contactVertex);
+    if (penetratingVertices.length > 0) {
+        const avgPenetration = totalPenetration / penetratingVertices.length;
+        let contactPoint = new Vector2D(0, 0);
+        for (const v of penetratingVertices) {
+            contactPoint = contactPoint.add(v);
+        }
+        contactPoint = contactPoint.multiply(1 / penetratingVertices.length);
+
+        // FIX: Apply impulse based on state AT collision, THEN correct position.
+        // This ensures the lever arm for torque is calculated correctly.
+        this.applyImpulse(block, null, normal, plane.restitution, plane.friction, contactPoint);
+        block.position = block.position.add(normal.multiply(avgPenetration * 1.01));
     }
   }
   
   private handleArcCollision(obj: Ball | Block, arc: Arc): void {
     if (obj.type === 'ball') {
-        const toBall = obj.position.subtract(arc.center);
-        const dist = toBall.magnitude();
-        if (dist === 0) return;
+      const toBall = obj.position.subtract(arc.center);
+      const dist = toBall.magnitude();
+      if (dist === 0) return;
 
-        let angle = Math.atan2(toBall.y, toBall.x);
-        if (angle < 0) angle += 2 * Math.PI;
-        
-        const start = arc.startAngle; const end = arc.endAngle;
-        const inAngleRange = (start < end) ? (angle >= start && angle <= end) : (angle >= start || angle <= end);
+      let angle = Math.atan2(toBall.y, toBall.x);
+      if (angle < 0) angle += 2 * Math.PI;
+      
+      const start = arc.startAngle; const end = arc.endAngle;
+      const inAngleRange = (start < end) ? (angle >= start && angle <= end) : (angle >= start || angle <= end);
 
-        if (!inAngleRange) return;
+      if (!inAngleRange) return;
 
-        const penetration = obj.radius - Math.abs(dist - arc.radius);
-        if (penetration > 0) {
-            const normal = dist > arc.radius ? toBall.normalize() : toBall.normalize().multiply(-1);
-            const relativeVelocity = obj.velocity; // Arc is static
-            if (relativeVelocity.dot(normal) < 0) {
-                obj.position = obj.position.add(normal.multiply(penetration * 1.01));
-                this.applyImpulse(obj, null, normal, arc.restitution, arc.friction);
+      const penetration = obj.radius - Math.abs(dist - arc.radius);
+      if (penetration > 0) {
+          // Normal points from center to ball for convex (outside) collision,
+          // and from ball to center for concave (inside) collision.
+          const normal = dist > arc.radius ? toBall.normalize() : toBall.normalize().multiply(-1);
+          const relativeVelocity = obj.velocity; // Arc is static
+          if (relativeVelocity.dot(normal) < 0) {
+              obj.position = obj.position.add(normal.multiply(penetration * 1.01));
+              this.applyImpulse(obj, null, normal, arc.restitution, arc.friction);
+          }
+      }
+    } else if (obj.type === 'block') {
+        const vertices = this.getBlockVertices(obj);
+        let maxPenetration = 0;
+        let contactVertex: Vector2D | null = null;
+        let collisionNormal: Vector2D | null = null;
+
+        for (const vertex of vertices) {
+            const toVertex = vertex.subtract(arc.center);
+            const dist = toVertex.magnitude();
+            if (dist === 0) continue;
+
+            let angle = Math.atan2(toVertex.y, toVertex.x);
+            if (angle < 0) angle += 2 * Math.PI;
+            
+            const start = arc.startAngle; const end = arc.endAngle;
+            const inAngleRange = (start < end) ? (angle >= start && angle <= end) : (angle >= start || angle <= end);
+
+            if (inAngleRange) {
+                // Heuristic: assume block center vs arc radius determines if it's inside or outside collision
+                const centerDist = obj.position.subtract(arc.center).magnitude();
+                let penetration = 0;
+                if (centerDist > arc.radius) { // outside (convex)
+                    if (dist < arc.radius) {
+                        penetration = arc.radius - dist;
+                    }
+                } else { // inside (concave)
+                    if (dist > arc.radius) {
+                        penetration = dist - arc.radius;
+                    }
+                }
+
+                if (penetration > maxPenetration) {
+                    maxPenetration = penetration;
+                    contactVertex = vertex;
+                    const normal = toVertex.normalize();
+                    collisionNormal = (centerDist > arc.radius) ? normal.multiply(-1) : normal;
+                }
             }
         }
-    } else if (obj.type === 'block') {
-        this.handleBlockArcCollision(obj, arc);
-    }
-  }
-
-  private handleBlockArcCollision(block: Block, arc: Arc): void {
-    const vertices = this.getBlockVertices(block);
-    let maxPenetration = 0;
-    let contactVertex: Vector2D | null = null;
-    let collisionNormal: Vector2D | null = null;
-
-    for (const vertex of vertices) {
-        const toVertex = vertex.subtract(arc.center);
-        const dist = toVertex.magnitude();
-        if (dist === 0) continue;
         
-        let angle = Math.atan2(toVertex.y, toVertex.x);
-        if (angle < 0) angle += 2 * Math.PI;
-        const start = arc.startAngle; const end = arc.endAngle;
-        const inAngleRange = (start < end) ? (angle >= start && angle <= end) : (angle >= start || angle <= end);
-
-        if (!inAngleRange) continue;
-        
-        // Assuming concave arc for simplicity (objects inside)
-        const penetration = arc.radius - dist;
-        if (penetration > maxPenetration) {
-            maxPenetration = penetration;
-            contactVertex = vertex;
-            collisionNormal = arc.center.subtract(vertex).normalize();
-        }
-    }
-
-    if (contactVertex && collisionNormal && maxPenetration > 0) {
-        const relativeVelocity = block.velocity; // Arc is static
-        if (relativeVelocity.dot(collisionNormal) < 0) {
-            block.position = block.position.add(collisionNormal.multiply(-maxPenetration * 1.01));
-            this.applyImpulse(block, null, collisionNormal, arc.restitution, arc.friction, contactVertex);
+        if (contactVertex && collisionNormal && maxPenetration > 0) {
+            // FIX: The positional correction was inverted, causing objects to stick.
+            obj.position = obj.position.add(collisionNormal.multiply(maxPenetration * 1.01));
+            this.applyImpulse(obj, null, collisionNormal, arc.restitution, arc.friction, contactVertex);
         }
     }
   }
 
-  private handleBallBallCollision(ballA: Ball, ballB: Ball): void {
-    const collisionVector = ballA.position.subtract(ballB.position);
-    const dist = collisionVector.magnitude();
-    const min_dist = ballA.radius + ballB.radius;
+    private handleBallBallCollision(ballA: Ball, ballB: Ball): void {
+        const n = ballB.position.subtract(ballA.position);
+        const dist = n.magnitude();
+        const penetration = ballA.radius + ballB.radius - dist;
 
-    if (dist < min_dist) {
-        // Resolve penetration
-        const penetration = min_dist - dist;
-        const normal = dist > 0 ? collisionVector.normalize() : new Vector2D(1, 0);
-        const totalMass = ballA.mass + ballB.mass;
-        if (totalMass > 0) {
-            ballA.position = ballA.position.add(normal.multiply(penetration * (ballB.mass / totalMass)));
-            ballB.position = ballB.position.subtract(normal.multiply(penetration * (ballA.mass / totalMass)));
+        if (penetration > 0) {
+            const normal = n.normalize();
+            // Resolve penetration
+            const invMassA = 1 / ballA.mass;
+            const invMassB = 1 / ballB.mass;
+            const totalInvMass = invMassA + invMassB;
+            if (totalInvMass === 0) return;
+
+            const separation = normal.multiply(penetration / totalInvMass);
+            ballA.position = ballA.position.subtract(separation.multiply(invMassA));
+            ballB.position = ballB.position.add(separation.multiply(invMassB));
+
+            // Apply impulse
+            this.applyDynamicImpulse(ballA, ballB, normal);
         }
-
-        // Apply impulse
-        const relativeVelocity = ballA.velocity.subtract(ballB.velocity);
-        const velAlongNormal = relativeVelocity.dot(normal);
-        
-        if (velAlongNormal > 0) return; // Moving away
-
-        const restitution = Math.min(ballA.restitution, ballB.restitution);
-        const invMassA = 1 / ballA.mass;
-        const invMassB = 1 / ballB.mass;
-        
-        let j = -(1 + restitution) * velAlongNormal;
-        j /= invMassA + invMassB;
-
-        const impulse = normal.multiply(j);
-        ballA.velocity = ballA.velocity.add(impulse.multiply(invMassA));
-        ballB.velocity = ballB.velocity.subtract(impulse.multiply(invMassB));
     }
-  }
 
     private handleBallBlockCollision(ball: Ball, block: Block): void {
         const vertices = this.getBlockVertices(block);
@@ -787,6 +878,9 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
         case 'rod': this.drawRod(obj); break;
         case 'pin': this.drawPin(obj); break;
         case 'field': this.drawFieldRegion(obj); break;
+        case 'trajectory': this.drawTrajectory(obj); break;
+        case 'constantForce': this.drawConstantForce(obj); break;
+        case 'initialVelocity': this.drawInitialVelocity(obj); break;
       }
   }
 
@@ -879,6 +973,37 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
     this.ctx.strokeStyle = '#e2e8f0';
     this.ctx.lineWidth = 2 / this.zoom;
     this.ctx.stroke();
+  }
+
+  private drawTrajectory(obj: Trajectory): void {
+    const points = this.trajectoryPoints.get(obj.id);
+    if (!points || points.length < 2) return;
+    this.ctx.beginPath();
+    this.ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+        this.ctx.lineTo(points[i].x, points[i].y);
+    }
+    this.ctx.strokeStyle = '#a78bfa'; // violet-400
+    this.ctx.lineWidth = 2 / this.zoom;
+    this.ctx.stroke();
+  }
+
+  private drawConstantForce(obj: ConstantForce): void {
+    const target = this.objectsMap().get(obj.attachedToId);
+    if (target && 'position' in target) {
+        this.ctx.strokeStyle = '#f87171'; // red-400
+        this.ctx.lineWidth = 2.5 / this.zoom;
+        this.drawArrow(target.position, obj.force.multiply(0.1));
+    }
+  }
+
+  private drawInitialVelocity(obj: InitialVelocity): void {
+      const target = this.objectsMap().get(obj.attachedToId);
+      if (target && 'position' in target) {
+          this.ctx.strokeStyle = '#34d399'; // green-400
+          this.ctx.lineWidth = 2.5 / this.zoom;
+          this.drawArrow(target.position, obj.velocity.multiply(0.5));
+      }
   }
   
   private drawFieldRegion(region: FieldRegion): void {
@@ -1139,9 +1264,24 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
         this.updateCursor();
         return;
     }
+
+    const type = this.placingObjectType()?.();
+    const isTool = type && ['trajectory', 'constantForce', 'initialVelocity'].includes(type);
+
+    if (isTool) {
+        const clickedObject = this.getObjectAtPosition(worldPos);
+        if (clickedObject && (clickedObject.type === 'ball' || clickedObject.type === 'block')) {
+            this.placeObject.emit({ attachedToId: clickedObject.id });
+        } else {
+            // Clicked on empty space or invalid object, cancel placement
+            this.placeObject.emit({}); // Will be handled by app component
+        }
+        return;
+    }
     
     if (this.handlePlacementClick(worldPos)) return;
-    if (this.placingObjectType()?.()) {
+
+    if (type) {
         this.placeObject.emit(worldPos);
         return;
     }
@@ -1175,36 +1315,15 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
       this.snappedObject = null;
       let isStrongSnapped = false;
       const snapDist = SNAP_DISTANCE / this.zoom;
-      const axisSnapDist = WEAK_SNAP_DISTANCE / this.zoom;
-
-      // Priority 1: Strong Snapping (center-to-center and ball-to-surface)
-      if (this.dragTarget.type === 'ball') {
-          for (const obj of this.objects()()) {
-              if (obj.type === 'plane' || obj.type === 'conveyor') {
-                  if (this.distToSegment(targetPos, obj.start, obj.end) < snapDist) {
-                      const lineVec = obj.end.subtract(obj.start);
-                      const normal = new Vector2D(-lineVec.y, lineVec.x).normalize();
-                      const vecToStart = targetPos.subtract(obj.start);
-                      const projDist = vecToStart.dot(lineVec.normalize());
-                      const projectedPoint = obj.start.add(lineVec.normalize().multiply(projDist));
-
-                      targetPos = projectedPoint.add(normal.multiply(this.dragTarget.radius));
-                      this.snappedObject = obj;
-                      isStrongSnapped = true;
-                      break;
-                  }
-              }
-          }
-      }
-      if (!isStrongSnapped) {
-          for (const obj of this.objects()()) {
-              if (obj.id === this.dragTarget.id || !('position' in obj)) continue;
-              if (targetPos.subtract(obj.position).magnitude() < snapDist) {
-                  targetPos = obj.position.clone();
-                  this.snappedObject = obj;
-                  isStrongSnapped = true;
-                  break;
-              }
+      
+      // Priority 1: Strong Snapping (center-to-center)
+      for (const obj of this.objects()()) {
+          if (obj.id === this.dragTarget.id || !('position' in obj)) continue;
+          if (targetPos.subtract(obj.position).magnitude() < snapDist) {
+              targetPos = obj.position.clone();
+              this.snappedObject = obj;
+              isStrongSnapped = true;
+              break;
           }
       }
 
@@ -1213,6 +1332,7 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
 
       // Priority 2: Axis Snapping (to other objects and main axes)
       if (!isStrongSnapped) {
+          const axisSnapDist = WEAK_SNAP_DISTANCE / this.zoom;
           for (const obj of this.objects()()) {
               if (obj.id === this.dragTarget.id || !('position' in obj)) continue;
               if (!snappedX && Math.abs(targetPos.x - obj.position.x) < axisSnapDist) {
@@ -1236,20 +1356,19 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
       }
       
       // Priority 3: Grid Snapping (weakest)
-      if (!isStrongSnapped) {
+      if (!isStrongSnapped && !snappedX && !snappedY) {
           const gridStep = this.getGridStep();
-          const snapThreshold = WEAK_SNAP_DISTANCE / this.zoom;
-          if (!snappedX) {
-              const snappedXPos = Math.round(targetPos.x / gridStep) * gridStep;
-              if (Math.abs(targetPos.x - snappedXPos) < snapThreshold) {
-                  targetPos.x = snappedXPos;
-              }
+          // FIX: Weaken grid snapping for a less "sticky" feel.
+          const gridSnapThreshold = gridStep / 10;
+
+          const nearestGridX = Math.round(targetPos.x / gridStep) * gridStep;
+          if (Math.abs(targetPos.x - nearestGridX) < gridSnapThreshold) {
+              targetPos.x = nearestGridX;
           }
-          if (!snappedY) {
-              const snappedYPos = Math.round(targetPos.y / gridStep) * gridStep;
-              if (Math.abs(targetPos.y - snappedYPos) < snapThreshold) {
-                  targetPos.y = snappedYPos;
-              }
+          
+          const nearestGridY = Math.round(targetPos.y / gridStep) * gridStep;
+          if (Math.abs(targetPos.y - nearestGridY) < gridSnapThreshold) {
+              targetPos.y = nearestGridY;
           }
       }
 
@@ -1307,8 +1426,12 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
 
   private updateCursor(): void {
     const canvas = this.canvasRef.nativeElement;
+    const type = this.placingObjectType()?.();
+    const isTool = type && ['trajectory', 'constantForce', 'initialVelocity'].includes(type);
+
     if (this.isPanning) canvas.style.cursor = 'grabbing';
-    else if (this.placingObjectType()?.()) canvas.style.cursor = 'crosshair';
+    else if (type && !this.placementState.isPlacing && !isTool) canvas.style.cursor = 'crosshair';
+    else if (this.placementState.isPlacing || isTool) canvas.style.cursor = 'crosshair';
     else if (this.isDragging) canvas.style.cursor = 'grabbing';
     else if (this.hoveredObject) canvas.style.cursor = 'pointer';
     else canvas.style.cursor = 'grab';
@@ -1427,6 +1550,13 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
             case 'spring':
                 const points = this.getConnectorPoints(obj);
                 if (points && this.distToSegment(pos, points.p1, points.p2) < tolerance) return obj;
+                break;
+            case 'constantForce':
+            case 'initialVelocity':
+                const target = this.objectsMap().get(obj.attachedToId);
+                if (target && 'position' in target && pos.subtract(target.position).magnitude() < CLICK_TOLERANCE / this.zoom * 2.5) {
+                    return obj;
+                }
                 break;
             case 'arc': {
                 const toCenter = pos.subtract(obj.center);

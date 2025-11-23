@@ -1,6 +1,6 @@
 import { Vector2D } from './vector.model';
 
-export type ObjectType = 'ball' | 'block' | 'plane' | 'spring' | 'conveyor' | 'arc' | 'rod' | 'pin' | 'field' | 'functionPlot';
+export type ObjectType = 'ball' | 'block' | 'plane' | 'spring' | 'conveyor' | 'arc' | 'rod' | 'pin' | 'field' | 'constantForce' | 'initialVelocity' | 'trajectory';
 
 export interface BaseObject {
   id: number;
@@ -112,13 +112,49 @@ export interface CircularFieldRegion extends BaseFieldRegion {
 
 export type FieldRegion = RectangularFieldRegion | PolygonalFieldRegion | CircularFieldRegion;
 
+export interface ConstantForce extends BaseObject {
+    type: 'constantForce';
+    attachedToId: number;
+    force: Vector2D;
+}
 
-export type PhysicsObject = Ball | Block | Plane | Spring | Conveyor | Arc | Rod | Pin | FieldRegion;
+export interface InitialVelocity extends BaseObject {
+    type: 'initialVelocity';
+    attachedToId: number;
+    velocity: Vector2D;
+}
 
-export interface GraphDataPoint {
+export interface Trajectory extends BaseObject {
+    type: 'trajectory';
+    attachedToId: number;
+    duration: number; // in seconds
+}
+
+
+export type PhysicsObject = Ball | Block | Plane | Spring | Conveyor | Arc | Rod | Pin | FieldRegion | ConstantForce | InitialVelocity | Trajectory;
+
+export interface KinematicsDataPoint {
+  type: 'kinematics';
   t: number;
   x: number;
   y: number;
   vx: number;
   vy: number;
+  kineticEnergy: number;
 }
+
+export interface SpringDataPoint {
+    type: 'spring';
+    t: number;
+    length: number;
+    potentialEnergy: number;
+}
+
+export interface RodDataPoint {
+    type: 'rod';
+    t: number;
+    angularVelocity: number;
+}
+
+
+export type GraphDataPoint = KinematicsDataPoint | SpringDataPoint | RodDataPoint;

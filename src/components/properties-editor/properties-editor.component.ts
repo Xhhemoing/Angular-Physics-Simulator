@@ -9,42 +9,49 @@ import { Vector2D } from '../../models/vector.model';
 })
 export class PropertiesEditorComponent {
   selectedObject = input<PhysicsObject | null>();
-  pinnedIds = input.required<number[]>();
-
+  pinnedObject = input<PhysicsObject | null>();
   objectChange = output<PhysicsObject>();
   deleteObject = output<void>();
-  pinObject = output<number>();
+  togglePin = output<void>();
 
-  isPinned = computed(() => {
-    const obj = this.selectedObject();
-    return obj ? this.pinnedIds().includes(obj.id) : false;
-  });
+  isPinned = computed(() => this.selectedObject() && this.selectedObject()?.id === this.pinnedObject()?.id);
+
+  private deepCloneWithVectors(obj: any): any {
+    if (obj === null || typeof obj !== 'object') {
+        return obj;
+    }
+
+    if (obj instanceof Vector2D) {
+        return obj.clone();
+    }
+
+    if (Array.isArray(obj)) {
+        return obj.map(item => this.deepCloneWithVectors(item));
+    }
+
+    const newObj: { [key: string]: any } = {};
+    for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            newObj[key] = this.deepCloneWithVectors(obj[key]);
+        }
+    }
+    return newObj;
+  }
 
   onValueChange(property: string, value: string | number): void {
     const obj = this.selectedObject();
     if (!obj) return;
 
-    // Create a deep enough copy to modify nested properties
-    const newObj = JSON.parse(JSON.stringify(obj));
+    // Use a robust deep clone that preserves Vector2D instances
+    const newObj = this.deepCloneWithVectors(obj);
     const numValue = typeof value === 'string' ? (parseFloat(value) || 0) : value;
 
     const keys = property.split('.');
-    let current = newObj;
+    let current: any = newObj;
     for (let i = 0; i < keys.length - 1; i++) {
       current = current[keys[i]];
     }
     current[keys[keys.length - 1]] = numValue;
-    
-    // Re-instantiate Vector2D objects after JSON stringify/parse
-    for (const key of ['position', 'velocity', 'center', 'start', 'end', 'electricField']) {
-        if (key in newObj && newObj[key] && typeof newObj[key] === 'object' && 'x' in newObj[key]) {
-            newObj[key] = new Vector2D(newObj[key].x, newObj[key].y);
-        }
-    }
-    if (newObj.type === 'field' && newObj.shape === 'polygon') {
-      newObj.vertices = (newObj as PolygonalFieldRegion).vertices.map(v => new Vector2D(v.x, v.y));
-    }
-
 
     if (newObj.type === 'block' && ['mass', 'width', 'height'].includes(keys[0])) {
       const b = newObj as Block;
@@ -58,10 +65,7 @@ export class PropertiesEditorComponent {
     this.deleteObject.emit();
   }
 
-  onPin(): void {
-    const obj = this.selectedObject();
-    if (obj) {
-      this.pinObject.emit(obj.id);
-    }
+  onTogglePin(): void {
+    this.togglePin.emit();
   }
 }
