@@ -1,5 +1,5 @@
-import { Component, ChangeDetectionStrategy, input, output } from '@angular/core';
-import { PhysicsObject, Ball, Block, Plane, Conveyor, Spring, Rod, Pin } from '../../models/physics-objects.model';
+import { Component, ChangeDetectionStrategy, input, output, computed } from '@angular/core';
+import { PhysicsObject, Ball, Block, Plane, Conveyor, Spring, Rod, Pin, FieldRegion, PolygonalFieldRegion } from '../../models/physics-objects.model';
 import { Vector2D } from '../../models/vector.model';
 
 @Component({
@@ -9,8 +9,16 @@ import { Vector2D } from '../../models/vector.model';
 })
 export class PropertiesEditorComponent {
   selectedObject = input<PhysicsObject | null>();
+  pinnedIds = input.required<number[]>();
+
   objectChange = output<PhysicsObject>();
   deleteObject = output<void>();
+  pinObject = output<number>();
+
+  isPinned = computed(() => {
+    const obj = this.selectedObject();
+    return obj ? this.pinnedIds().includes(obj.id) : false;
+  });
 
   onValueChange(property: string, value: string | number): void {
     const obj = this.selectedObject();
@@ -29,10 +37,14 @@ export class PropertiesEditorComponent {
     
     // Re-instantiate Vector2D objects after JSON stringify/parse
     for (const key of ['position', 'velocity', 'center', 'start', 'end', 'electricField']) {
-        if (key in newObj && newObj[key] && typeof newObj[key] === 'object') {
+        if (key in newObj && newObj[key] && typeof newObj[key] === 'object' && 'x' in newObj[key]) {
             newObj[key] = new Vector2D(newObj[key].x, newObj[key].y);
         }
     }
+    if (newObj.type === 'field' && newObj.shape === 'polygon') {
+      newObj.vertices = (newObj as PolygonalFieldRegion).vertices.map(v => new Vector2D(v.x, v.y));
+    }
+
 
     if (newObj.type === 'block' && ['mass', 'width', 'height'].includes(keys[0])) {
       const b = newObj as Block;
@@ -44,5 +56,12 @@ export class PropertiesEditorComponent {
   
   onDelete(): void {
     this.deleteObject.emit();
+  }
+
+  onPin(): void {
+    const obj = this.selectedObject();
+    if (obj) {
+      this.pinObject.emit(obj.id);
+    }
   }
 }

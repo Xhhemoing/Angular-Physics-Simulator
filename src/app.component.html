@@ -11,7 +11,7 @@
   </div>
 
   <!-- Center Panel: Simulation and Controls -->
-  <div class="flex-1 flex flex-col">
+  <div class="flex-1 flex flex-col relative">
     <div class="bg-gray-800 p-2 border-b border-gray-700 flex items-center justify-between">
       <!-- Left Controls -->
       <div class="flex items-center space-x-4">
@@ -39,6 +39,7 @@
                       [class]="simulationSettings().collisionsEnabled ? 'translate-x-6' : 'translate-x-1'"></span>
             </button>
         </div>
+        <button (click)="makeAllSmooth()" title="将所有平面和圆弧设为光滑（摩擦力=0）" class="px-3 py-2 bg-gray-700 rounded-md hover:bg-cyan-600 text-sm">一键光滑</button>
       </div>
       <!-- Right Controls -->
       <div class="flex items-center space-x-2">
@@ -57,12 +58,36 @@
         [objects]="physicsObjects"
         [settings]="simulationSettings()"
         [placingObjectType]="placingObjectType"
+        [placingFieldShape]="placingFieldShape"
         [selectedObject]="selectedObject"
         (selectObject)="selectObject($event)"
         (placeObject)="placeObject($event)"
         (dataPoint)="addDataPoint($event)">
       </app-simulation-canvas>
     </div>
+
+    <!-- Pinned Objects Area -->
+    @if (pinnedObjects().length > 0) {
+      <div class="absolute top-16 left-1/2 -translate-x-1/2 z-10 flex gap-3">
+        @for(pobj of pinnedObjects(); track pobj.id) {
+          @if (pobj) {
+            <div class="bg-gray-800/80 backdrop-blur-sm p-3 rounded-lg shadow-lg w-56 text-sm text-gray-200 border border-gray-700">
+              <div class="flex justify-between items-center mb-1">
+                <span class="font-bold capitalize text-cyan-400">{{pobj.type}} #{{pobj.id}}</span>
+                <button (click)="togglePin(pobj.id)" class="text-gray-400 hover:text-red-500 text-lg font-bold leading-none">&times;</button>
+              </div>
+              @if ('position' in pobj) {
+                <div>Pos: ({{pobj.position.x.toFixed(1)}}, {{pobj.position.y.toFixed(1)}})</div>
+              }
+              @if ('velocity' in pobj) {
+                <div>Vel: ({{pobj.velocity.x.toFixed(1)}}, {{pobj.velocity.y.toFixed(1)}})</div>
+              }
+            </div>
+          }
+        }
+      </div>
+    }
+
   </div>
 
   <!-- Right Panel: Properties Editor -->
@@ -70,8 +95,10 @@
     <h2 class="text-xl font-bold text-cyan-400 mb-4">属性</h2>
     <app-properties-editor 
       [selectedObject]="selectedObject()"
+      [pinnedIds]="pinnedObjectIds()"
       (objectChange)="updateObject($event)"
-      (deleteObject)="deleteSelectedObject()">
+      (deleteObject)="deleteSelectedObject()"
+      (pinObject)="togglePin($event)">
     </app-properties-editor>
 
     @if (selectedObject(); as obj) {
@@ -82,4 +109,49 @@
       }
     }
   </div>
+
+  <!-- Function Plot Dialog -->
+  @if(showFunctionDialog()) {
+    <div class="absolute inset-0 bg-black/70 flex items-center justify-center z-50" (click)="showFunctionDialog.set(false)">
+        <div class="bg-gray-800 p-6 rounded-lg w-[450px] space-y-4 border border-gray-700 shadow-2xl" (click)="$event.stopPropagation()">
+            <h3 class="text-xl font-bold text-cyan-400">从函数创建</h3>
+            
+            <div class="flex items-center">
+                <label for="fn-str" class="w-20">y(x) = </label>
+                <input id="fn-str" type="text" [(ngModel)]="functionPlotOptions.functionString" class="flex-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none font-mono">
+            </div>
+             <div class="flex items-center">
+                <label for="fn-y-offset" class="w-20">Y 偏移</label>
+                <input id="fn-y-offset" type="number" [(ngModel)]="functionPlotOptions.yOffset" class="flex-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label for="fn-x-min" class="text-sm">X 范围从</label>
+                    <input id="fn-x-min" type="number" [(ngModel)]="functionPlotOptions.xMin" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+                </div>
+                <div>
+                    <label for="fn-x-max" class="text-sm">到</label>
+                    <input id="fn-x-max" type="number" [(ngModel)]="functionPlotOptions.xMax" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+                </div>
+            </div>
+            <div>
+                <label for="fn-segments" class="text-sm">线段数 ({{functionPlotOptions.segments}})</label>
+                <input id="fn-segments" type="range" min="2" max="200" [(ngModel)]="functionPlotOptions.segments" class="w-full mt-1 h-2 bg-gray-900/70 rounded-lg appearance-none cursor-pointer">
+            </div>
+             <div>
+                <label class="text-sm">创建为</label>
+                <div class="flex mt-2 gap-2">
+                    <button (click)="functionPlotOptions.type = 'track'" [class]="functionPlotOptions.type === 'track' ? 'bg-cyan-500 text-white' : 'bg-gray-700'" class="flex-1 py-2 rounded-md">轨道</button>
+                    <button (click)="functionPlotOptions.type = 'field'" [class]="functionPlotOptions.type === 'field' ? 'bg-cyan-500 text-white' : 'bg-gray-700'" class="flex-1 py-2 rounded-md">场区域</button>
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-3 pt-2">
+                <button (click)="showFunctionDialog.set(false)" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg">取消</button>
+                <button (click)="createFunctionObject()" class="px-4 py-2 bg-green-500 hover:bg-green-600 rounded-lg">创建</button>
+            </div>
+        </div>
+    </div>
+  }
+
 </div>

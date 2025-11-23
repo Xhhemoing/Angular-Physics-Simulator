@@ -1,6 +1,6 @@
 import { Vector2D } from './vector.model';
 
-export type ObjectType = 'ball' | 'block' | 'plane' | 'spring' | 'conveyor' | 'arc' | 'rod' | 'pin' | 'field';
+export type ObjectType = 'ball' | 'block' | 'plane' | 'spring' | 'conveyor' | 'arc' | 'rod' | 'pin' | 'field' | 'functionPlot';
 
 export interface BaseObject {
   id: number;
@@ -81,16 +81,36 @@ export interface Arc extends StaticObject {
   endAngle: number; // radians
 }
 
-export interface FieldRegion extends BaseObject {
+export type FieldShape = 'rectangle' | 'polygon' | 'circle';
+
+export interface BaseFieldRegion extends BaseObject {
   type: 'field';
-  position: Vector2D;
-  width: number;
-  height: number;
-  angle: number;
   electricField: Vector2D;
   magneticField: number;
   color: string;
 }
+
+export interface RectangularFieldRegion extends BaseFieldRegion {
+    shape: 'rectangle';
+    position: Vector2D; // center
+    width: number;
+    height: number;
+    angle: number;
+}
+
+export interface PolygonalFieldRegion extends BaseFieldRegion {
+    shape: 'polygon';
+    vertices: Vector2D[];
+    position: Vector2D; // centroid
+}
+
+export interface CircularFieldRegion extends BaseFieldRegion {
+    shape: 'circle';
+    position: Vector2D; // center
+    radius: number;
+}
+
+export type FieldRegion = RectangularFieldRegion | PolygonalFieldRegion | CircularFieldRegion;
 
 
 export type PhysicsObject = Ball | Block | Plane | Spring | Conveyor | Arc | Rod | Pin | FieldRegion;

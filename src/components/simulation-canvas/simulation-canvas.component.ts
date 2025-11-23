@@ -1,11 +1,11 @@
 import { Component, ChangeDetectionStrategy, ElementRef, ViewChild, AfterViewInit, OnDestroy, input, output, effect, WritableSignal, Signal, computed } from '@angular/core';
-import { PhysicsObject, DynamicObject, Plane, Conveyor, Spring, Ball, ObjectType, Arc, Block, Rod, Pin, GraphDataPoint, FieldRegion } from '../../models/physics-objects.model';
+import { PhysicsObject, DynamicObject, Plane, Conveyor, Spring, Ball, ObjectType, Arc, Block, Rod, Pin, GraphDataPoint, FieldRegion, FieldShape, CircularFieldRegion, PolygonalFieldRegion, RectangularFieldRegion } from '../../models/physics-objects.model';
 import { Vector2D } from '../../models/vector.model';
 
 const PIN_CLICK_RADIUS = 10;
 const SNAP_DISTANCE = 15;
 const CLICK_TOLERANCE = 8;
-const WEAK_SNAP_DISTANCE = 5;
+const WEAK_SNAP_DISTANCE = 10;
 
 @Component({
   selector: 'app-simulation-canvas',
@@ -18,6 +18,7 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
   objects = input.required<WritableSignal<PhysicsObject[]>>();
   settings = input.required<{ isRunning: boolean; gravity: number; collisionsEnabled: boolean }>();
   placingObjectType = input.required<Signal<ObjectType | null>>();
+  placingFieldShape = input.required<Signal<FieldShape | null>>();
   selectedObject = input<Signal<PhysicsObject | null>>();
   
   selectObject = output<number | null>();
@@ -44,12 +45,14 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
   private placementState: {
     isPlacing: boolean;
     type: ObjectType | null;
-    step: 'start' | 'end' | 'center' | 'radius_start' | 'end_angle';
+    shape?: FieldShape | null;
+    step: 'start' | 'end' | 'center' | 'radius_start' | 'end_angle' | 'polygon_point';
     startPoint?: Vector2D;
     centerPoint?: Vector2D;
     radius?: number;
     startAngle?: number;
     object1Id?: number;
+    polygonVertices?: Vector2D[];
   } = { isPlacing: false, type: null, step: 'start' };
 
   private objectsMap = computed(() => new Map(this.objects()().map(o => [o.id, o])));
@@ -76,8 +79,18 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
     
     effect(() => {
       const type = this.placingObjectType()?.();
-      const step = type === 'arc' ? 'center' : 'start';
-      this.placementState = type ? { isPlacing: true, type, step } : { isPlacing: false, type: null, step: 'start' };
+      const shape = this.placingFieldShape()?.();
+      if (type === 'functionPlot') {
+          this.placementState = { isPlacing: false, type: null, step: 'start' };
+          return;
+      }
+      let step: typeof this.placementState.step = 'start';
+      if (type === 'arc' || (type === 'field' && shape === 'circle')) {
+        step = 'center';
+      } else if (type === 'field' && shape === 'polygon') {
+        step = 'polygon_point';
+      }
+      this.placementState = type ? { isPlacing: true, type, shape, step, polygonVertices: [] } : { isPlacing: false, type: null, step: 'start' };
       this.updateCursor();
     });
   }
@@ -228,33 +241,15 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
       const fieldRegions = objects.filter((f): f is FieldRegion => f.type === 'field');
 
       for (const obj of dynamicObjects) {
-          if (!obj.charge) continue;
+          if (obj.charge === 0) continue;
 
           for (const region of fieldRegions) {
-              // Transform object position to field's local coordinates to handle rotation
-              const localPos = obj.position.subtract(region.position);
-              const cos = Math.cos(-region.angle);
-              const sin = Math.sin(-region.angle);
-              const rotatedPos = new Vector2D(
-                  localPos.x * cos - localPos.y * sin,
-                  localPos.x * sin + localPos.y * cos
-              );
-
-              const isInside = Math.abs(rotatedPos.x) < region.width / 2 && Math.abs(rotatedPos.y) < region.height / 2;
-
-              if (isInside) {
-                  // Electric force: F = qE. E is in local space, so rotate force back to world space.
-                  const localElectricForce = region.electricField;
-                  const worldCos = Math.cos(region.angle);
-                  const worldSin = Math.sin(region.angle);
-                  const electricForce = new Vector2D(
-                      localElectricForce.x * worldCos - localElectricForce.y * worldSin,
-                      localElectricForce.x * worldSin + localElectricForce.y * worldCos
-                  ).multiply(obj.charge);
+              if (this.isObjectInRegion(obj, region)) {
+                  // Electric force: F = qE.
+                  const electricForce = region.electricField.multiply(obj.charge);
                   obj.force = obj.force.add(electricForce);
 
                   // Magnetic force: F = q(v x B). In 2D, with B in z-dir: F = q * (vy*Bz, -vx*Bz).
-                  // This force is dependent on world velocity and is correctly calculated in world space.
                   if (region.magneticField !== 0) {
                       const magneticForce = new Vector2D(
                           obj.velocity.y * region.magneticField,
@@ -330,7 +325,7 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
 
   private resolveDynamicCollision(objA: Ball | Block, objB: Ball | Block): void {
       if (objA.type === 'ball' && objB.type === 'ball') {
-        // Not implemented as it wasn't requested, but simple to add if needed
+        this.handleBallBallCollision(objA, objB);
       } else if (objA.type === 'ball' && objB.type === 'block') {
           this.handleBallBlockCollision(objA, objB);
       } else if (objA.type === 'block' && objB.type === 'ball') {
@@ -423,29 +418,100 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
   }
   
   private handleArcCollision(obj: Ball | Block, arc: Arc): void {
-    if (obj.type !== 'ball') return;
-    const toBall = obj.position.subtract(arc.center);
-    const dist = toBall.magnitude();
-    if (dist === 0) return;
+    if (obj.type === 'ball') {
+        const toBall = obj.position.subtract(arc.center);
+        const dist = toBall.magnitude();
+        if (dist === 0) return;
 
-    let angle = Math.atan2(toBall.y, toBall.x);
-    if (angle < 0) angle += 2 * Math.PI;
-    
-    const start = arc.startAngle; const end = arc.endAngle;
-    const inAngleRange = (start < end) ? (angle >= start && angle <= end) : (angle >= start || angle <= end);
+        let angle = Math.atan2(toBall.y, toBall.x);
+        if (angle < 0) angle += 2 * Math.PI;
+        
+        const start = arc.startAngle; const end = arc.endAngle;
+        const inAngleRange = (start < end) ? (angle >= start && angle <= end) : (angle >= start || angle <= end);
 
-    if (!inAngleRange) return;
+        if (!inAngleRange) return;
 
-    const penetration = obj.radius - Math.abs(dist - arc.radius);
-    if (penetration > 0) {
-        // Normal points from center to ball for convex (outside) collision,
-        // and from ball to center for concave (inside) collision.
-        const normal = dist > arc.radius ? toBall.normalize() : toBall.normalize().multiply(-1);
-        const relativeVelocity = obj.velocity; // Arc is static
-        if (relativeVelocity.dot(normal) < 0) {
-            obj.position = obj.position.add(normal.multiply(penetration * 1.01));
-            this.applyImpulse(obj, null, normal, arc.restitution, arc.friction);
+        const penetration = obj.radius - Math.abs(dist - arc.radius);
+        if (penetration > 0) {
+            const normal = dist > arc.radius ? toBall.normalize() : toBall.normalize().multiply(-1);
+            const relativeVelocity = obj.velocity; // Arc is static
+            if (relativeVelocity.dot(normal) < 0) {
+                obj.position = obj.position.add(normal.multiply(penetration * 1.01));
+                this.applyImpulse(obj, null, normal, arc.restitution, arc.friction);
+            }
         }
+    } else if (obj.type === 'block') {
+        this.handleBlockArcCollision(obj, arc);
+    }
+  }
+
+  private handleBlockArcCollision(block: Block, arc: Arc): void {
+    const vertices = this.getBlockVertices(block);
+    let maxPenetration = 0;
+    let contactVertex: Vector2D | null = null;
+    let collisionNormal: Vector2D | null = null;
+
+    for (const vertex of vertices) {
+        const toVertex = vertex.subtract(arc.center);
+        const dist = toVertex.magnitude();
+        if (dist === 0) continue;
+        
+        let angle = Math.atan2(toVertex.y, toVertex.x);
+        if (angle < 0) angle += 2 * Math.PI;
+        const start = arc.startAngle; const end = arc.endAngle;
+        const inAngleRange = (start < end) ? (angle >= start && angle <= end) : (angle >= start || angle <= end);
+
+        if (!inAngleRange) continue;
+        
+        // Assuming concave arc for simplicity (objects inside)
+        const penetration = arc.radius - dist;
+        if (penetration > maxPenetration) {
+            maxPenetration = penetration;
+            contactVertex = vertex;
+            collisionNormal = arc.center.subtract(vertex).normalize();
+        }
+    }
+
+    if (contactVertex && collisionNormal && maxPenetration > 0) {
+        const relativeVelocity = block.velocity; // Arc is static
+        if (relativeVelocity.dot(collisionNormal) < 0) {
+            block.position = block.position.add(collisionNormal.multiply(-maxPenetration * 1.01));
+            this.applyImpulse(block, null, collisionNormal, arc.restitution, arc.friction, contactVertex);
+        }
+    }
+  }
+
+  private handleBallBallCollision(ballA: Ball, ballB: Ball): void {
+    const collisionVector = ballA.position.subtract(ballB.position);
+    const dist = collisionVector.magnitude();
+    const min_dist = ballA.radius + ballB.radius;
+
+    if (dist < min_dist) {
+        // Resolve penetration
+        const penetration = min_dist - dist;
+        const normal = dist > 0 ? collisionVector.normalize() : new Vector2D(1, 0);
+        const totalMass = ballA.mass + ballB.mass;
+        if (totalMass > 0) {
+            ballA.position = ballA.position.add(normal.multiply(penetration * (ballB.mass / totalMass)));
+            ballB.position = ballB.position.subtract(normal.multiply(penetration * (ballA.mass / totalMass)));
+        }
+
+        // Apply impulse
+        const relativeVelocity = ballA.velocity.subtract(ballB.velocity);
+        const velAlongNormal = relativeVelocity.dot(normal);
+        
+        if (velAlongNormal > 0) return; // Moving away
+
+        const restitution = Math.min(ballA.restitution, ballB.restitution);
+        const invMassA = 1 / ballA.mass;
+        const invMassB = 1 / ballB.mass;
+        
+        let j = -(1 + restitution) * velAlongNormal;
+        j /= invMassA + invMassB;
+
+        const impulse = normal.multiply(j);
+        ballA.velocity = ballA.velocity.add(impulse.multiply(invMassA));
+        ballB.velocity = ballB.velocity.subtract(impulse.multiply(invMassB));
     }
   }
 
@@ -662,11 +728,7 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
     const topLeft = this.getWorldPos(new Vector2D(0, 0));
     const bottomRight = this.getWorldPos(new Vector2D(width, height));
 
-    let step = 100;
-    if (this.zoom > 1.5) step = 50;
-    if (this.zoom > 3) step = 25;
-    if (this.zoom < 0.75) step = 200;
-    if (this.zoom < 0.3) step = 500;
+    const step = this.getGridStep();
 
     this.ctx.strokeStyle = 'rgba(156, 163, 175, 0.2)'; // gray-400
     this.ctx.lineWidth = 1 / this.zoom;
@@ -820,27 +882,91 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
   }
   
   private drawFieldRegion(region: FieldRegion): void {
+    switch(region.shape) {
+      case 'rectangle': this.drawRectangularField(region); break;
+      case 'circle': this.drawCircularField(region); break;
+      case 'polygon': this.drawPolygonalField(region); break;
+    }
+  }
+
+  private drawRectangularField(region: RectangularFieldRegion): void {
     this.ctx.translate(region.position.x, region.position.y);
     this.ctx.rotate(region.angle);
     
+    this.drawFieldContents(region, () => {
+      this.ctx.beginPath();
+      this.ctx.rect(-region.width / 2, -region.height / 2, region.width, region.height);
+    });
+  }
+
+  private drawCircularField(region: CircularFieldRegion): void {
+    this.ctx.translate(region.position.x, region.position.y);
+    this.drawFieldContents(region, () => {
+      this.ctx.beginPath();
+      this.ctx.arc(0, 0, region.radius, 0, Math.PI * 2);
+    });
+  }
+
+  private drawPolygonalField(region: PolygonalFieldRegion): void {
+    if (region.vertices.length < 2) return;
+    this.drawFieldContents(region, () => {
+      this.ctx.beginPath();
+      this.ctx.moveTo(region.vertices[0].x, region.vertices[0].y);
+      for(let i = 1; i < region.vertices.length; i++) {
+        this.ctx.lineTo(region.vertices[i].x, region.vertices[i].y);
+      }
+      this.ctx.closePath();
+    });
+  }
+
+  private drawFieldContents(region: FieldRegion, drawShape: () => void): void {
     // Draw semi-transparent background
+    this.ctx.save();
+    drawShape();
     this.ctx.fillStyle = region.color;
     this.ctx.globalAlpha = 0.2;
-    this.ctx.fillRect(-region.width / 2, -region.height / 2, region.width, region.height);
+    this.ctx.fill();
     this.ctx.globalAlpha = 1;
 
     // Draw border
     this.ctx.strokeStyle = region.color;
     this.ctx.lineWidth = 2 / this.zoom;
-    this.ctx.strokeRect(-region.width / 2, -region.height / 2, region.width, region.height);
+    this.ctx.stroke();
+    this.ctx.restore();
+
+    // Draw field indicators (E and B fields)
+    this.ctx.save();
+    drawShape();
+    this.ctx.clip(); // Use shape as clipping mask for indicators
+    
+    // Determine bounding box for drawing indicators
+    let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+    if(region.shape === 'rectangle') {
+        const w = region.width / 2; const h = region.height / 2;
+        minX = -w; minY = -h; maxX = w; maxY = h;
+    } else if (region.shape === 'circle') {
+        minX = -region.radius; minY = -region.radius;
+        maxX = region.radius; maxY = region.radius;
+    } else if (region.shape === 'polygon') {
+        const { vertices } = region;
+        if(this.ctx.getTransform().a !== 1) { // If rotated/translated for rect, polygon needs world coords
+          const transform = this.ctx.getTransform();
+          const invTransform = transform.inverse();
+          minX = region.vertices.reduce((min, v) => Math.min(min, v.x), Infinity);
+          maxX = region.vertices.reduce((max, v) => Math.max(max, v.x), -Infinity);
+          minY = region.vertices.reduce((min, v) => Math.min(min, v.y), Infinity);
+          maxY = region.vertices.reduce((max, v) => Math.max(max, v.y), -Infinity);
+        }
+    }
+
 
     const spacing = 40;
     // Draw Electric Field arrows
     if (region.electricField.magnitude() > 0.1) {
         this.ctx.strokeStyle = '#FBBF24'; // amber-400
         this.ctx.lineWidth = 1.5 / this.zoom;
-        for (let x = -region.width / 2 + spacing/2; x < region.width / 2; x += spacing) {
-            for (let y = -region.height / 2 + spacing/2; y < region.height / 2; y += spacing) {
+        for (let x = minX; x < maxX; x += spacing) {
+            for (let y = minY; y < maxY; y += spacing) {
                 this.drawArrow(new Vector2D(x, y), region.electricField.normalize().multiply(15));
             }
         }
@@ -851,8 +977,8 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
         this.ctx.strokeStyle = '#EC4899'; // pink-500
         this.ctx.lineWidth = 1.5 / this.zoom;
         const r = 5 / this.zoom;
-        for (let x = -region.width / 2 + spacing/2; x < region.width / 2; x += spacing) {
-            for (let y = -region.height / 2 + spacing/2; y < region.height / 2; y += spacing) {
+        for (let x = minX; x < maxX; x += spacing) {
+            for (let y = minY; y < maxY; y += spacing) {
                 this.ctx.beginPath();
                 this.ctx.arc(x, y, r, 0, Math.PI * 2);
                 this.ctx.stroke();
@@ -871,7 +997,9 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
             }
         }
     }
+    this.ctx.restore();
   }
+
 
   private drawArrow(from: Vector2D, vec: Vector2D): void {
       const to = from.add(vec);
@@ -899,9 +1027,15 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
       switch (type) {
           case 'ball': this.drawBall({ position: this.mousePosWorld, radius: 20, color: 'white' } as Ball); break;
           case 'block': this.drawBlock({ position: this.mousePosWorld, width: 50, height: 50, angle: 0, color: 'white' } as Block); break;
-          case 'conveyor': this.drawConveyor({ start: this.mousePosWorld.subtract(new Vector2D(150, 0)), end: this.mousePosWorld.add(new Vector2D(150, 0)) } as Conveyor); break;
           case 'pin': this.drawPin({ position: this.mousePosWorld } as Pin); break;
-          case 'field': this.drawFieldRegion({ position: this.mousePosWorld, width: 200, height: 200, angle: 0, electricField: new Vector2D(), magneticField: 0, color: 'white' } as FieldRegion); break;
+          case 'field':
+            const shape = this.placingFieldShape()?.();
+            if (shape === 'rectangle') {
+              this.drawRectangularField({ position: this.mousePosWorld, width: 200, height: 200, angle: 0, color: 'white' } as RectangularFieldRegion);
+            } else if (shape === 'circle') {
+              this.drawCircularField({ position: this.mousePosWorld, radius: 100, color: 'white' } as CircularFieldRegion);
+            }
+            break;
       }
       this.ctx.restore();
   }
@@ -911,11 +1045,45 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
     this.ctx.save();
     this.ctx.globalAlpha = 0.7;
     this.ctx.setLineDash([8 / this.zoom, 8 / this.zoom]);
-    const { type, step, startPoint, object1Id, centerPoint, radius, startAngle } = this.placementState;
-    if (type === 'plane' && step === 'end' && startPoint) {
+    const { type, shape, step, startPoint, object1Id, centerPoint, radius, startAngle, polygonVertices } = this.placementState;
+
+    if ((type === 'plane' || type === 'conveyor') && step === 'end' && startPoint) {
         this.ctx.beginPath(); this.ctx.moveTo(startPoint.x, startPoint.y);
         this.ctx.lineTo(this.mousePosWorld.x, this.mousePosWorld.y);
-        this.ctx.strokeStyle = '#a0aec0'; this.ctx.lineWidth = 5 / this.zoom; this.ctx.stroke();
+        this.ctx.strokeStyle = type === 'conveyor' ? '#63b3ed' : '#a0aec0';
+        this.ctx.lineWidth = (type === 'conveyor' ? 10 : 5) / this.zoom;
+        this.ctx.stroke();
+    } else if (type === 'field' && shape === 'rectangle' && step === 'end' && startPoint) {
+        const width = this.mousePosWorld.x - startPoint.x;
+        const height = this.mousePosWorld.y - startPoint.y;
+        this.ctx.strokeStyle = '#4A5568';
+        this.ctx.lineWidth = 2 / this.zoom;
+        this.ctx.strokeRect(startPoint.x, startPoint.y, width, height);
+    } else if (type === 'field' && shape === 'circle' && step === 'radius_start' && centerPoint) {
+        const r = this.mousePosWorld.subtract(centerPoint).magnitude();
+        this.ctx.beginPath();
+        this.ctx.arc(centerPoint.x, centerPoint.y, r, 0, Math.PI * 2);
+        this.ctx.strokeStyle = '#4A5568';
+        this.ctx.lineWidth = 2 / this.zoom;
+        this.ctx.stroke();
+    } else if (type === 'field' && shape === 'polygon' && step === 'polygon_point' && polygonVertices && polygonVertices.length > 0) {
+        this.ctx.beginPath();
+        this.ctx.moveTo(polygonVertices[0].x, polygonVertices[0].y);
+        for(let i=1; i < polygonVertices.length; i++) this.ctx.lineTo(polygonVertices[i].x, polygonVertices[i].y);
+        this.ctx.lineTo(this.mousePosWorld.x, this.mousePosWorld.y);
+        this.ctx.strokeStyle = '#4A5568';
+        this.ctx.lineWidth = 2 / this.zoom;
+        this.ctx.stroke();
+
+        // Highlight start point if mouse is close enough to close the polygon
+        const distToStart = this.mousePosWorld.subtract(polygonVertices[0]).magnitude();
+        if (polygonVertices.length > 1 && distToStart < (CLICK_TOLERANCE * 2) / this.zoom) {
+            this.ctx.beginPath();
+            this.ctx.arc(polygonVertices[0].x, polygonVertices[0].y, CLICK_TOLERANCE / this.zoom, 0, Math.PI * 2);
+            this.ctx.fillStyle = 'rgba(0, 255, 255, 0.5)';
+            this.ctx.fill();
+        }
+
     } else if ((type === 'spring' || type === 'rod') && step === 'end' && object1Id) {
         const obj1 = this.objectsMap().get(object1Id);
         if (obj1 && 'position' in obj1) {
@@ -981,7 +1149,7 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
     const clickedObject = this.getObjectAtPosition(worldPos);
     this.selectObject.emit(clickedObject?.id ?? null);
 
-    if (clickedObject?.type === 'ball' || clickedObject?.type === 'block' || clickedObject?.type === 'field') {
+    if (clickedObject && (clickedObject.type === 'ball' || clickedObject.type === 'block' || clickedObject.type === 'field')) {
       this.isDragging = true;
       this.dragTarget = clickedObject;
       this.dragOffset = worldPos.subtract(clickedObject.position);
@@ -1006,34 +1174,21 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
       let targetPos = this.mousePosWorld.subtract(this.dragOffset);
       this.snappedObject = null;
       let isStrongSnapped = false;
+      const snapDist = SNAP_DISTANCE / this.zoom;
+      const axisSnapDist = WEAK_SNAP_DISTANCE / this.zoom;
 
-      if (this.dragTarget.type === 'ball' || this.dragTarget.type === 'block') {
-          // New: Plane surface snapping for balls
-          if (this.dragTarget.type === 'ball') {
-              for (const obj of this.objects()()) {
-                  if (obj.type === 'plane' || obj.type === 'conveyor') {
-                      if (this.distToSegment(targetPos, obj.start, obj.end) < SNAP_DISTANCE / this.zoom) {
-                          const lineVec = obj.end.subtract(obj.start);
-                          const normal = new Vector2D(-lineVec.y, lineVec.x).normalize();
-                          const vecToStart = targetPos.subtract(obj.start);
-                          const projDist = vecToStart.dot(lineVec.normalize());
-                          const projectedPoint = obj.start.add(lineVec.normalize().multiply(projDist));
+      // Priority 1: Strong Snapping (center-to-center and ball-to-surface)
+      if (this.dragTarget.type === 'ball') {
+          for (const obj of this.objects()()) {
+              if (obj.type === 'plane' || obj.type === 'conveyor') {
+                  if (this.distToSegment(targetPos, obj.start, obj.end) < snapDist) {
+                      const lineVec = obj.end.subtract(obj.start);
+                      const normal = new Vector2D(-lineVec.y, lineVec.x).normalize();
+                      const vecToStart = targetPos.subtract(obj.start);
+                      const projDist = vecToStart.dot(lineVec.normalize());
+                      const projectedPoint = obj.start.add(lineVec.normalize().multiply(projDist));
 
-                          targetPos = projectedPoint.add(normal.multiply(this.dragTarget.radius));
-                          this.snappedObject = obj;
-                          isStrongSnapped = true;
-                          break;
-                      }
-                  }
-              }
-          }
-
-          // Original center-to-center snapping
-          if (!isStrongSnapped) {
-              for (const obj of this.objects()()) {
-                  if (obj.id === this.dragTarget.id || !('position' in obj)) continue;
-                  if (targetPos.subtract(obj.position).magnitude() < SNAP_DISTANCE / this.zoom) {
-                      targetPos = obj.position.clone();
+                      targetPos = projectedPoint.add(normal.multiply(this.dragTarget.radius));
                       this.snappedObject = obj;
                       isStrongSnapped = true;
                       break;
@@ -1041,15 +1196,60 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
               }
           }
       }
-      
-      // Weak axis snapping
       if (!isStrongSnapped) {
-          const weakSnapDist = WEAK_SNAP_DISTANCE / this.zoom;
-          if (Math.abs(targetPos.x) < weakSnapDist) {
-              targetPos.x = 0;
+          for (const obj of this.objects()()) {
+              if (obj.id === this.dragTarget.id || !('position' in obj)) continue;
+              if (targetPos.subtract(obj.position).magnitude() < snapDist) {
+                  targetPos = obj.position.clone();
+                  this.snappedObject = obj;
+                  isStrongSnapped = true;
+                  break;
+              }
           }
-          if (Math.abs(targetPos.y) < weakSnapDist) {
+      }
+
+      let snappedX = false;
+      let snappedY = false;
+
+      // Priority 2: Axis Snapping (to other objects and main axes)
+      if (!isStrongSnapped) {
+          for (const obj of this.objects()()) {
+              if (obj.id === this.dragTarget.id || !('position' in obj)) continue;
+              if (!snappedX && Math.abs(targetPos.x - obj.position.x) < axisSnapDist) {
+                  targetPos.x = obj.position.x;
+                  snappedX = true;
+              }
+              if (!snappedY && Math.abs(targetPos.y - obj.position.y) < axisSnapDist) {
+                  targetPos.y = obj.position.y;
+                  snappedY = true;
+              }
+              if(snappedX && snappedY) break;
+          }
+          if (!snappedX && Math.abs(targetPos.x) < axisSnapDist) {
+              targetPos.x = 0;
+              snappedX = true;
+          }
+          if (!snappedY && Math.abs(targetPos.y) < axisSnapDist) {
               targetPos.y = 0;
+              snappedY = true;
+          }
+      }
+      
+      // Priority 3: Grid Snapping (weakest)
+      if (!isStrongSnapped) {
+          const gridStep = this.getGridStep();
+          const snapThreshold = WEAK_SNAP_DISTANCE / this.zoom;
+          if (!snappedX) {
+              const snappedXPos = Math.round(targetPos.x / gridStep) * gridStep;
+              if (Math.abs(targetPos.x - snappedXPos) < snapThreshold) {
+                  targetPos.x = snappedXPos;
+              }
+          }
+          if (!snappedY) {
+              const snappedYPos = Math.round(targetPos.y / gridStep) * gridStep;
+              if (Math.abs(targetPos.y - snappedYPos) < snapThreshold) {
+                  targetPos.y = snappedYPos;
+              }
           }
       }
 
@@ -1080,6 +1280,15 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
   }
 
   // --- Helpers ---
+  private getGridStep(): number {
+    let step = 100;
+    if (this.zoom > 1.5) step = 50;
+    if (this.zoom > 3) step = 25;
+    if (this.zoom < 0.75) step = 200;
+    if (this.zoom < 0.3) step = 500;
+    return step;
+  }
+
   private resizeCanvas = (): void => {
     const canvas = this.canvasRef.nativeElement;
     canvas.width = canvas.offsetWidth;
@@ -1115,10 +1324,11 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
 
   private handlePlacementClick(worldPos: Vector2D): boolean {
     if (!this.placementState.isPlacing) return false;
-    const { type, step, startPoint, object1Id, centerPoint, radius, startAngle } = this.placementState;
+    const { type, shape, step, startPoint, object1Id, centerPoint, radius, startAngle, polygonVertices } = this.placementState;
 
     switch (type) {
       case 'plane':
+      case 'conveyor':
         if (step === 'start') {
           this.placementState.startPoint = worldPos;
           this.placementState.step = 'end';
@@ -1139,7 +1349,6 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
           if (clickableObj && clickableObj.id !== object1Id) {
             this.placeObject.emit({ object1Id, object2Id: clickableObj.id });
           } else {
-            // Clicked on empty space or same object, cancel placement
             this.placementState = { isPlacing: false, type: null, step: 'start' };
           }
         }
@@ -1159,6 +1368,40 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
           this.placeObject.emit({ center: centerPoint, radius, startAngle, endAngle });
         }
         return true;
+      case 'field':
+        switch(shape) {
+          case 'rectangle':
+            if (step === 'start') {
+              this.placementState.startPoint = worldPos;
+              this.placementState.step = 'end';
+            } else {
+              this.placeObject.emit({ start: startPoint, end: worldPos });
+            }
+            return true;
+          case 'circle':
+            if (step === 'center') {
+              this.placementState.centerPoint = worldPos;
+              this.placementState.step = 'radius_start';
+            } else if (step === 'radius_start' && centerPoint) {
+              const radius = worldPos.subtract(centerPoint).magnitude();
+              this.placeObject.emit({ center: centerPoint, radius });
+            }
+            return true;
+          case 'polygon':
+            if (step === 'polygon_point' && polygonVertices) {
+              // Close polygon if clicking near start
+              if (polygonVertices.length > 2) {
+                const distToStart = worldPos.subtract(polygonVertices[0]).magnitude();
+                if (distToStart < (CLICK_TOLERANCE * 2) / this.zoom) {
+                  this.placeObject.emit({ vertices: polygonVertices });
+                  return true;
+                }
+              }
+              polygonVertices.push(worldPos);
+            }
+            return true;
+        }
+        return false;
       default:
         return false;
     }
@@ -1172,13 +1415,10 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
         switch (obj.type) {
             case 'ball': if (pos.subtract(obj.position).magnitude() < obj.radius) return obj; break;
             case 'block':
+                if (this.isPointInRect(pos, obj)) return obj;
+                break;
             case 'field':
-                const localPos = pos.subtract(obj.position);
-                const rotatedPos = new Vector2D(
-                    localPos.x * Math.cos(-obj.angle) - localPos.y * Math.sin(-obj.angle),
-                    localPos.x * Math.sin(-obj.angle) + localPos.y * Math.cos(-obj.angle)
-                );
-                if (Math.abs(rotatedPos.x) < obj.width / 2 && Math.abs(rotatedPos.y) < obj.height / 2) return obj;
+                if (this.isObjectInRegion({ position: pos } as DynamicObject, obj)) return obj;
                 break;
             case 'pin': if (pos.subtract(obj.position).magnitude() < PIN_CLICK_RADIUS / this.zoom) return obj; break;
             case 'plane':
@@ -1215,6 +1455,41 @@ export class SimulationCanvasComponent implements AfterViewInit, OnDestroy {
     return null;
   }
   
+  private isObjectInRegion(obj: DynamicObject, region: FieldRegion): boolean {
+    switch (region.shape) {
+        case 'rectangle':
+            return this.isPointInRect(obj.position, region);
+        case 'circle':
+            return obj.position.subtract(region.position).magnitude() < region.radius;
+        case 'polygon':
+            return this.isPointInPolygon(obj.position, region.vertices);
+    }
+    return false;
+  }
+  
+  private isPointInRect(point: Vector2D, rect: RectangularFieldRegion | Block): boolean {
+    const localPos = point.subtract(rect.position);
+    const angle = (rect as Block).angle ?? 0;
+    const rotatedPos = new Vector2D(
+        localPos.x * Math.cos(-angle) - localPos.y * Math.sin(-angle),
+        localPos.x * Math.sin(-angle) + localPos.y * Math.cos(-angle)
+    );
+    return Math.abs(rotatedPos.x) < rect.width / 2 && Math.abs(rotatedPos.y) < rect.height / 2;
+  }
+
+  private isPointInPolygon(point: Vector2D, vertices: Vector2D[]): boolean {
+    let isInside = false;
+    for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+        const xi = vertices[i].x, yi = vertices[i].y;
+        const xj = vertices[j].x, yj = vertices[j].y;
+
+        const intersect = ((yi > point.y) !== (yj > point.y))
+            && (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
+        if (intersect) isInside = !isInside;
+    }
+    return isInside;
+  }
+
   private getConnectorPoints = (obj: Spring | Rod): {p1: Vector2D, p2: Vector2D} | null => {
       const allObjectsMap = this.objectsMap();
       const obj1 = allObjectsMap.get(obj.object1Id);

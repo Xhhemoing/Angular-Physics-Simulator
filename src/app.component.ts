@@ -1,9 +1,9 @@
-import { Component, ChangeDetectionStrategy, signal, WritableSignal, ViewChild } from '@angular/core';
+import { Component, ChangeDetectionStrategy, signal, WritableSignal, ViewChild, computed } from '@angular/core';
 import { ObjectPaletteComponent } from './components/object-palette/object-palette.component';
 import { PropertiesEditorComponent } from './components/properties-editor/properties-editor.component';
 import { SimulationCanvasComponent } from './components/simulation-canvas/simulation-canvas.component';
 import { GraphViewComponent } from './components/graph-view/graph-view.component';
-import { PhysicsObject, ObjectType, Arc, DynamicObject, Pin, Rod, Block, GraphDataPoint, FieldRegion } from './models/physics-objects.model';
+import { PhysicsObject, ObjectType, Arc, DynamicObject, Pin, Rod, Block, GraphDataPoint, FieldRegion, FieldShape, PolygonalFieldRegion, Plane } from './models/physics-objects.model';
 import { Vector2D } from './models/vector.model';
 
 @Component({
@@ -25,6 +25,7 @@ export class AppComponent {
   ]);
   selectedObject: WritableSignal<PhysicsObject | null> = signal(null);
   placingObjectType: WritableSignal<ObjectType | null> = signal(null);
+  placingFieldShape: WritableSignal<FieldShape | null> = signal(null);
   
   simulationSettings = signal({
     gravity: 9.8,
@@ -34,14 +35,41 @@ export class AppComponent {
   
   graphData: WritableSignal<GraphDataPoint[]> = signal([]);
 
+  // Pinned objects feature
+  pinnedObjectIds = signal<number[]>([]);
+  pinnedObjects = computed(() => {
+    const objectsMap = new Map(this.physicsObjects().map(o => [o.id, o]));
+    return this.pinnedObjectIds().map(id => objectsMap.get(id)).filter((o): o is PhysicsObject => !!o);
+  });
+  
+  // Function plot feature
+  showFunctionDialog = signal(false);
+  functionPlotOptions = {
+    functionString: '100 * Math.sin(x / 50)',
+    xMin: 0,
+    xMax: 400,
+    segments: 40,
+    type: 'track' as 'track' | 'field',
+    yOffset: 300
+  };
+
   @ViewChild(SimulationCanvasComponent) simulationCanvas!: SimulationCanvasComponent;
 
   private getNextId(): number {
     return this.objectIdCounter++;
   }
 
-  startPlacingObject(type: ObjectType): void {
-    this.placingObjectType.set(type);
+  startPlacingObject(payload: { type: ObjectType, shape?: FieldShape }): void {
+    if (payload.type === 'functionPlot') {
+        this.showFunctionDialog.set(true);
+        return;
+    }
+    this.placingObjectType.set(payload.type);
+    if (payload.type === 'field' && payload.shape) {
+        this.placingFieldShape.set(payload.shape);
+    } else {
+        this.placingFieldShape.set(null);
+    }
     this.selectObject(null);
   }
 
@@ -83,7 +111,7 @@ export class AppComponent {
         break;
       case 'conveyor':
         newObject = {
-          id, type, start: new Vector2D(payload.x - 150, payload.y), end: new Vector2D(payload.x + 150, payload.y),
+          id, type, start: payload.start, end: payload.end,
           friction: 0.1, speed: 50, isSelected: false, restitution: 0.5
         };
         break;
@@ -135,14 +163,57 @@ export class AppComponent {
         } as Pin;
         break;
       case 'field':
-        newObject = {
-            id, type, position: payload,
-            width: 200, height: 200, angle: 0,
-            electricField: new Vector2D(50, 0),
-            magneticField: 0,
-            isSelected: false,
-            color: '#4A5568'
-        } as FieldRegion;
+        const shape = this.placingFieldShape();
+        if (!shape) return;
+
+        switch(shape) {
+            case 'rectangle': {
+                const start = payload.start as Vector2D;
+                const end = payload.end as Vector2D;
+                const rectWidth = Math.abs(end.x - start.x);
+                const rectHeight = Math.abs(end.y - start.y);
+                const position = new Vector2D((start.x + end.x) / 2, (start.y + end.y) / 2);
+                newObject = {
+                    id, type, shape, position: position,
+                    width: rectWidth, height: rectHeight, angle: 0,
+                    electricField: new Vector2D(50, 0), magneticField: 0,
+                    isSelected: false, color: '#4A5568'
+                };
+                break;
+            }
+            case 'circle': {
+                newObject = {
+                    id, type, shape, position: payload.center, radius: payload.radius,
+                    electricField: new Vector2D(50, 0), magneticField: 0,
+                    isSelected: false, color: '#4A5568'
+                };
+                break;
+            }
+            case 'polygon': {
+                const vertices = payload.vertices as Vector2D[];
+                if (vertices.length < 3) return;
+                // Calculate centroid
+                let signedArea = 0;
+                let cx = 0, cy = 0;
+                for (let i = 0; i < vertices.length; i++) {
+                    const v0 = vertices[i];
+                    const v1 = vertices[(i + 1) % vertices.length];
+                    const cross = (v0.x * v1.y - v1.x * v0.y);
+                    signedArea += cross;
+                    cx += (v0.x + v1.x) * cross;
+                    cy += (v0.y + v1.y) * cross;
+                }
+                signedArea /= 2;
+                const centroid = signedArea === 0 ? payload.vertices[0] : new Vector2D(cx / (6 * signedArea), cy / (6 * signedArea));
+                
+                newObject = {
+                    id, type, shape, vertices: vertices, position: centroid,
+                    electricField: new Vector2D(50, 0), magneticField: 0,
+                    isSelected: false, color: '#4A5568'
+                } as PolygonalFieldRegion;
+                break;
+            }
+        }
         break;
     }
 
@@ -151,6 +222,7 @@ export class AppComponent {
       this.selectObject(newObject.id);
     }
     this.placingObjectType.set(null);
+    this.placingFieldShape.set(null);
   }
   
   selectObject(id: number | null): void {
@@ -167,7 +239,7 @@ export class AppComponent {
       });
     });
     this.selectedObject.set(newSelectedObject);
-    if (this.simulationSettings().isRunning) {
+    if (this.simulationSettings().isRunning && newSelectedObject) {
         this.graphData.set([]);
         this.simulationCanvas?.resetTime();
     }
@@ -179,7 +251,10 @@ export class AppComponent {
       if (index > -1) {
         const newObjects = [...objects];
         newObjects[index] = updatedObject;
-        this.selectedObject.set(updatedObject);
+        // Also update the selected object signal if it's the same object
+        if (this.selectedObject()?.id === updatedObject.id) {
+            this.selectedObject.set(updatedObject);
+        }
         return newObjects;
       }
       return objects;
@@ -199,7 +274,7 @@ export class AppComponent {
   }
 
   togglePlay(): void {
-    if (!this.simulationSettings().isRunning) { // About to start
+    if (!this.simulationSettings().isRunning && this.selectedObject()) { // About to start
       this.graphData.set([]);
       this.simulationCanvas?.resetTime();
     }
@@ -215,10 +290,87 @@ export class AppComponent {
     this.selectedObject.set(null);
     this.objectIdCounter = 0;
     this.graphData.set([]);
+    this.pinnedObjectIds.set([]);
   }
 
   addDataPoint(point: GraphDataPoint): void {
     this.graphData.update(data => [...data, point]);
+  }
+
+  makeAllSmooth(): void {
+    this.physicsObjects.update(objects => 
+        objects.map(obj => {
+            if (obj.type === 'plane' || obj.type === 'arc' || obj.type === 'conveyor') {
+                return { ...obj, friction: 0 };
+            }
+            return obj;
+        })
+    );
+    // If selected object was smoothed, update the signal to refresh properties editor
+    const selected = this.selectedObject();
+    if (selected && (selected.type === 'plane' || selected.type === 'arc' || selected.type === 'conveyor')) {
+        this.selectedObject.update(obj => obj ? ({ ...obj, friction: 0 }) : null);
+    }
+  }
+
+  togglePin(id: number): void {
+    this.pinnedObjectIds.update(ids => {
+        const index = ids.indexOf(id);
+        if (index > -1) {
+            return ids.filter(pinnedId => pinnedId !== id);
+        } else {
+            return [...ids, id];
+        }
+    });
+  }
+  
+  createFunctionObject(): void {
+    try {
+        const fn = new Function('x', `return ${this.functionPlotOptions.functionString}`);
+        const points: Vector2D[] = [];
+        const { xMin, xMax, segments, yOffset } = this.functionPlotOptions;
+        const step = (xMax - xMin) / segments;
+
+        for(let i = 0; i <= segments; i++) {
+            const x = xMin + i * step;
+            const y = fn(x) + yOffset;
+            if (isNaN(y) || !isFinite(y)) throw new Error(`Invalid function output at x=${x}`);
+            points.push(new Vector2D(x, y));
+        }
+        
+        const newObjects: PhysicsObject[] = [];
+        if (this.functionPlotOptions.type === 'track') {
+            for(let i = 0; i < points.length - 1; i++) {
+                newObjects.push({
+                    id: this.getNextId(),
+                    type: 'plane',
+                    start: points[i],
+                    end: points[i+1],
+                    friction: 0.2,
+                    restitution: 0.5,
+                    isSelected: false,
+                } as Plane);
+            }
+        } else { // field
+            const groundLevel = Math.max(...points.map(p => p.y)) + 50;
+            const vertices = [
+                ...points,
+                new Vector2D(xMax, groundLevel),
+                new Vector2D(xMin, groundLevel)
+            ];
+            
+            this.placeObject({ vertices }); // Use the existing polygon field placement logic
+        }
+
+        if (newObjects.length > 0) {
+            this.physicsObjects.update(current => [...current, ...newObjects]);
+        }
+
+    } catch(e) {
+        console.error("Function plot error:", e);
+        alert(`Invalid function or range: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    this.showFunctionDialog.set(false);
   }
 
   // Canvas interaction methods
@@ -271,6 +423,13 @@ export class AppComponent {
         });
 
         if (!Array.isArray(objects)) throw new Error("Invalid file format");
+
+        // Migration for old field objects
+        objects.forEach((obj: any) => {
+          if (obj.type === 'field' && !obj.shape) {
+            obj.shape = 'rectangle';
+          }
+        });
 
         this.physicsObjects.set(objects);
         this.selectedObject.set(null);
