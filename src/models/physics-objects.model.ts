@@ -18,6 +18,7 @@ export interface DynamicObject extends BaseObject {
   restitution: number;
   friction: number;
   charge: number;
+  isStatic?: boolean;
 }
 
 export interface StaticObject extends BaseObject {

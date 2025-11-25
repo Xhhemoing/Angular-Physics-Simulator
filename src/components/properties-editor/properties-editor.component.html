@@ -59,6 +59,18 @@
             <input type="number" [value]="obj.velocity.y" (input)="onValueChange('velocity.y', $any($event.target).value)" class="w-1/2 bg-gray-900/70 border border-gray-600 rounded-md px-3 py-1.5 focus:ring-2 focus:ring-cyan-500 focus:outline-none">
           </div>
         </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-400">物理状态</label>
+          <button (click)="onToggleStatic()"
+                  class="mt-1 w-full text-white font-semibold py-2 px-4 rounded-lg transition duration-200"
+                  [class]="obj.isStatic ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-600 hover:bg-gray-500'">
+            @if (obj.isStatic) {
+              <span>设为动态</span>
+            } @else {
+              <span>设为静态</span>
+            }
+          </button>
+        </div>
       }
 
       <!-- Specific Properties -->

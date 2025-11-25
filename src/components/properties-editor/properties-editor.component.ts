@@ -1,5 +1,5 @@
 import { Component, ChangeDetectionStrategy, input, output, computed } from '@angular/core';
-import { PhysicsObject, Ball, Block, Plane, Conveyor, Spring, Rod, Pin, FieldRegion, PolygonalFieldRegion } from '../../models/physics-objects.model';
+import { PhysicsObject, Ball, Block, Plane, Conveyor, Spring, Rod, Pin, FieldRegion, PolygonalFieldRegion, DynamicObject } from '../../models/physics-objects.model';
 import { Vector2D } from '../../models/vector.model';
 
 @Component({
@@ -67,5 +67,22 @@ export class PropertiesEditorComponent {
 
   onTogglePin(): void {
     this.togglePin.emit();
+  }
+
+  onToggleStatic(): void {
+    const obj = this.selectedObject();
+    if (!obj || !(obj.type === 'ball' || obj.type === 'block')) return;
+
+    // FIX: Changed type assertion from DynamicObject to Ball | Block to allow for correct type narrowing.
+    const newObj = this.deepCloneWithVectors(obj) as Ball | Block;
+    newObj.isStatic = !newObj.isStatic;
+    
+    if (newObj.isStatic) {
+        newObj.velocity = new Vector2D(0, 0);
+        if (newObj.type === 'block') {
+            newObj.angularVelocity = 0;
+        }
+    }
+    this.objectChange.emit(newObj as PhysicsObject);
   }
 }
